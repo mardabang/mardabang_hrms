@@ -1,0 +1,4295 @@
+diff --git a/frontend/src/context/AuthContext.jsx b/frontend/src/context/AuthContext.jsx
+index 7de14b3..ff57e7d 100644
+--- a/frontend/src/context/AuthContext.jsx
++++ b/frontend/src/context/AuthContext.jsx
+@@ -33,6 +33,15 @@ export function AuthProvider({ children }) {
+     return raw ? JSON.parse(raw) : null;
+   });
+ 
++  const persistSession = useCallback((data) => {
++    localStorage.setItem("hrms_token", data.token || "");
++    localStorage.setItem("hrms_user", JSON.stringify(data));
++    localStorage.setItem("hrms-role", data.role);
++    localStorage.setItem("hrms-user", data.fullName || data.username);
++    localStorage.setItem("isAuthenticated", "true");
++    setUser(data);
++  }, []);
++
+   const login = useCallback(async (email, password) => {
+     const res = await api.post("/auth/login", {
+       email,
+@@ -40,15 +49,35 @@ export function AuthProvider({ children }) {
+     });
+ 
+     const data = normalizeUserData(res.data);
++    persistSession(data);
++    return data;
++  }, [persistSession]);
+ 
+-    localStorage.setItem("hrms_token", data.token || "");
+-    localStorage.setItem("hrms_user", JSON.stringify(data));
+-    localStorage.setItem("hrms-role", data.role);
+-    localStorage.setItem("hrms-user", data.fullName || data.username);
+-    localStorage.setItem("isAuthenticated", "true");
++  // Step 1 of OTP login: send a code to the given mobile number.
++  // Supervisor and Employee accounts only — no password involved.
++  const requestOtp = useCallback(async (mobile) => {
++    const res = await api.post("/auth/otp/request", { mobile });
++    return res.data;
++  }, []);
+ 
+-    setUser(data);
++  // Step 2 of OTP login: verify the code and complete sign-in.
++  const verifyOtp = useCallback(async (mobile, code) => {
++    const res = await api.post("/auth/otp/verify", { mobile, code });
++    const data = normalizeUserData(res.data);
++    persistSession(data);
+     return data;
++  }, [persistSession]);
++
++  // Admin-only password recovery. Always resolves quietly (the backend
++  // never reveals whether the email exists or belongs to an Admin account).
++  const forgotPassword = useCallback(async (email) => {
++    const res = await api.post("/auth/forgot-password", { email });
++    return res.data;
++  }, []);
++
++  const resetPassword = useCallback(async (token, newPassword) => {
++    const res = await api.post("/auth/reset-password", { token, newPassword });
++    return res.data;
+   }, []);
+ 
+   const logout = useCallback(() => {
+@@ -63,7 +92,9 @@ export function AuthProvider({ children }) {
+   const isAdmin = user?.role === "ADMIN";
+ 
+   return (
+-    <AuthContext.Provider value={{ user, login, logout, isAdmin }}>
++    <AuthContext.Provider
++      value={{ user, login, requestOtp, verifyOtp, forgotPassword, resetPassword, logout, isAdmin }}
++    >
+       {children}
+     </AuthContext.Provider>
+   );
+diff --git a/frontend/src/context/FirmContext.jsx b/frontend/src/context/FirmContext.jsx
+index 24eed79..79b96de 100644
+--- a/frontend/src/context/FirmContext.jsx
++++ b/frontend/src/context/FirmContext.jsx
+@@ -1,6 +1,7 @@
+ import { createContext, useContext, useEffect, useState } from "react";
+ import api from "../api/axios";
+ import { useAuth } from "./AuthContext";
++import { getEmployeeFirm } from "../utils/employeePortal";
+ 
+ const FirmContext = createContext(null);
+ const STORAGE_KEY = "hrms_selected_firm_code";
+@@ -13,6 +14,7 @@ export const FirmProvider = ({ children }) => {
+ 
+   // Wrap setSelectedFirm so every change also persists to localStorage
+   const setSelectedFirm = (firm) => {
++    if (user?.role === "EMPLOYEE") return;
+     setSelectedFirmState(firm);
+     if (firm?.code) {
+       localStorage.setItem(STORAGE_KEY, firm.code);
+@@ -22,17 +24,21 @@ export const FirmProvider = ({ children }) => {
+   };
+ 
+   useEffect(() => {
+-    if (!user) return;
++    setActiveFirms([]);
++    setSelectedFirmState(null);
++    if (!user || user.role === "EMPLOYEE") return;
++    let active = true;
+ 
+     const loadFirms = async () => {
+       try {
+         const res = await api.get("/firms");
++        if (!active) return;
+ 
+         let firms = res.data;
+ 
+-        if (user.role !== "ADMIN" && user.firms?.length) {
++        if (user.role !== "ADMIN") {
+           firms = firms.filter((firm) =>
+-            user.firms.includes(firm.code)
++            (user.firms || []).includes(firm.code)
+           );
+         }
+ 
+@@ -60,13 +66,14 @@ export const FirmProvider = ({ children }) => {
+     };
+ 
+     loadFirms();
++    return () => { active = false; };
+   }, [user]);
+ 
+   return (
+     <FirmContext.Provider
+       value={{
+-        activeFirms,
+-        selectedFirm,
++        activeFirms: user?.role === "EMPLOYEE" ? [getEmployeeFirm(user)].filter(Boolean) : activeFirms,
++        selectedFirm: user?.role === "EMPLOYEE" ? getEmployeeFirm(user) : selectedFirm,
+         setSelectedFirm,
+       }}
+     >
+diff --git a/frontend/src/context/ThemeContext.jsx b/frontend/src/context/ThemeContext.jsx
+index bbeefd6..0abcbee 100644
+--- a/frontend/src/context/ThemeContext.jsx
++++ b/frontend/src/context/ThemeContext.jsx
+@@ -3,12 +3,25 @@ import { createContext, useContext, useEffect, useState } from "react";
+ const ThemeContext = createContext();
+ 
+ export const ThemeProvider = ({ children }) => {
+-  const [darkMode, setDarkMode] = useState(false);
++  const [darkMode, setDarkMode] = useState(() => {
++    try { return localStorage.getItem("hrms-theme") === "dark"; } catch { return false; }
++  });
+ 
+   useEffect(() => {
+     document.documentElement.classList.toggle("dark", darkMode);
++    document.documentElement.classList.toggle("dark-mode", darkMode);
++    document.documentElement.style.colorScheme = darkMode ? "dark" : "light";
++    try { localStorage.setItem("hrms-theme", darkMode ? "dark" : "light"); } catch { /* Theme still works when storage is unavailable. */ }
+   }, [darkMode]);
+ 
++  useEffect(() => {
++    const syncTheme = event => {
++      if (event.key === "hrms-theme") setDarkMode(event.newValue === "dark");
++    };
++    window.addEventListener("storage", syncTheme);
++    return () => window.removeEventListener("storage", syncTheme);
++  }, []);
++
+   const toggleTheme = () => {
+     setDarkMode((prev) => !prev);
+   };
+diff --git a/frontend/src/pages/AddEmployee.jsx b/frontend/src/pages/AddEmployee.jsx
+index 03ff38a..e68f6f4 100644
+--- a/frontend/src/pages/AddEmployee.jsx
++++ b/frontend/src/pages/AddEmployee.jsx
+@@ -2,6 +2,9 @@ import React, { useEffect, useState } from "react";
+ import { useNavigate, useParams } from "react-router-dom";
+ import { addEmployee, downloadEmployeeDocument, getEmployeeById, hydrateEmployees, updateEmployee } from "../data/employees";
+ import { addActivity } from "../data/activityLog";
++import { useAuth } from "../context/AuthContext";
++import { useFirm } from "../context/FirmContext";
++import api from "../api/axios";
+ 
+ const today = new Date().toISOString().slice(0, 10);
+ const maxPdfSize = 5 * 1024 * 1024;
+@@ -9,6 +12,17 @@ const maxPdfSize = 5 * 1024 * 1024;
+ const initialForm = {
+   employeeCode: "",
+   name: "",
++  firstName: "",
++  lastName: "",
++  gender: "",
++  dateOfBirth: "",
++  employmentType: "",
++  address: "",
++  pfAccountNumber: "",
++  esiAccountNumber: "",
++  profilePhoto: null,
++  profilePhotoName: "",
++  firmId: null,
+   email: "",
+   department: "",
+   contact: "",
+@@ -43,15 +57,9 @@ const statutorySchemes = [
+ const RequiredMark = () => <span className="required-mark" aria-hidden="true">*</span>;
+ const FieldError = ({ id, message }) => message ? <span id={id} className="form-field-error" role="alert">{message}</span> : null;
+ 
+-const suggestEmployeeCode = (employees) => {
+-  const largest = employees.reduce((max, employee) => {
+-    const match = String(employee.employeeCode || employee.id || "").match(/^DMY(\d+)$/i);
+-    return match ? Math.max(max, Number(match[1])) : max;
+-  }, 0);
+-  return `DMY${String(largest + 1).padStart(3, "0")}`;
+-};
+-
+ const AddEmployee = () => {
++  const { user } = useAuth();
++  const { selectedFirm } = useFirm();
+   const navigate = useNavigate();
+   const { id } = useParams();
+   const isEditMode = Boolean(id);
+@@ -61,8 +69,12 @@ const AddEmployee = () => {
+   const [submitting, setSubmitting] = useState(false);
+ 
+   useEffect(() => {
++    if (!isEditMode) {
++      setFormData(initialForm);
++      return;
++    }
+     const loadEmployee = async () => {
+-      const employees = await hydrateEmployees();
++      await hydrateEmployees();
+       const employee = id ? getEmployeeById(id) : null;
+ 
+       if (isEditMode && !employee) {
+@@ -70,15 +82,21 @@ const AddEmployee = () => {
+         return;
+       }
+ 
+-      if (!employee) {
+-        setFormData((current) => ({ ...current, employeeCode: suggestEmployeeCode(employees) }));
+-        return;
+-      }
+-
+       const selectedSchemeNames = String(employee.statutorySchemes || "").split(",").map((value) => value.trim()).filter(Boolean);
+       setFormData({
+         employeeCode: employee.employeeCode || employee.id || "",
+         name: employee.name || "",
++        firstName: employee.firstName || "",
++        lastName: employee.lastName || "",
++        gender: employee.gender || "",
++        dateOfBirth: employee.dateOfBirth || "",
++        employmentType: employee.employmentType || "",
++        address: employee.address || "",
++        pfAccountNumber: employee.pfAccountNumber || "",
++        esiAccountNumber: employee.esiAccountNumber || "",
++        profilePhoto: null,
++        profilePhotoName: employee.profilePhotoName || "",
++        firmId: employee.firmId,
+         email: employee.email || "",
+         department: employee.department || "",
+         contact: employee.contact || "",
+@@ -121,6 +139,14 @@ const AddEmployee = () => {
+     else if (name.length < 2 || name.length > 100) nextErrors.name = "Name must contain 2–100 characters.";
+     else if (!/^[\p{L}][\p{L} .'-]*$/u.test(name)) nextErrors.name = "Enter a valid employee name.";
+ 
++    for (const field of ["firstName", "lastName"]) {
++      if (formData[field].trim() && (!/^[\p{L}][\p{L} .'-]*$/u.test(formData[field].trim()) || formData[field].trim().length > 100)) nextErrors[field] = "Enter a valid name, up to 100 characters.";
++    }
++    if (formData.dateOfBirth && formData.dateOfBirth >= today) nextErrors.dateOfBirth = "Date of birth must be before today.";
++    else if (formData.dateOfBirth && formData.joiningDate && formData.dateOfBirth >= formData.joiningDate) nextErrors.dateOfBirth = "Date of birth must be before the joining date.";
++    if (!isEditMode && user?.role === "ADMIN" && !selectedFirm?.id) nextErrors.firmId = "Select a firm before adding an employee.";
++    if (formData.profilePhoto && (formData.profilePhoto.size > 2 * 1024 * 1024 || !["image/jpeg", "image/png", "image/webp"].includes(formData.profilePhoto.type))) nextErrors.profilePhoto = "Choose a JPG, PNG or WEBP image up to 2 MB.";
++
+     if (!formData.designation) nextErrors.designation = "Designation is required.";
+     if (!formData.department) nextErrors.department = "Department is required.";
+     if (!formData.joiningDate) nextErrors.joiningDate = "Joining date is required.";
+@@ -204,6 +230,15 @@ const AddEmployee = () => {
+     const payload = {
+       employeeCode: formData.employeeCode.trim(),
+       name: formData.name.trim(),
++      firstName: formData.firstName.trim(),
++      lastName: formData.lastName.trim(),
++      gender: formData.gender,
++      dateOfBirth: formData.dateOfBirth || null,
++      employmentType: formData.employmentType.trim(),
++      address: formData.address.trim(),
++      pfAccountNumber: formData.pfAccountNumber.trim(),
++      esiAccountNumber: formData.esiAccountNumber.trim(),
++      firmId: isEditMode ? formData.firmId : selectedFirm?.id,
+       email: formData.email.trim(),
+       department: formData.department,
+       contact: formData.contact,
+@@ -227,18 +262,36 @@ const AddEmployee = () => {
+ 
+     setSubmitting(true);
+     setSubmitError("");
++    let employeeSaved = false;
+     try {
+-      if (isEditMode) {
+-        await updateEmployee(id, payload, { aadharDocument: formData.aadharFile, panDocument: formData.panFile });
+-        addActivity({ icon: "edit", title: "Employee profile updated", description: `${payload.name} (${payload.employeeCode}) details were updated.`, path: "/employees" });
++  if (isEditMode) {
++    await updateEmployee(id, payload, { aadharDocument: formData.aadharFile, panDocument: formData.panFile });
++    addActivity({ icon: "edit", title: "Employee profile updated", description: `${payload.name} (${payload.employeeCode}) details were updated.`, path: "/employees" });
++  } else if (user?.role === "SUPERVISOR") {
++    // Supervisor path: creates Employee HR record + linked login account together
++    const response = await api.post("/supervisor/employees", { employee: payload });
++    addActivity({ icon: "person_add", title: "New employee added", description: `${payload.name} (${payload.employeeCode}) was added.`, path: "/employees" });
++    alert(`Employee created. Temporary password: ${response.data.tempPassword}\n\nShare this with the employee — it won't be shown again.`);
++  } else {
++    // Admin path: existing behavior, unchanged
++    await addEmployee(payload, { aadharDocument: formData.aadharFile, panDocument: formData.panFile });
++    addActivity({ icon: "person_add", title: "New employee added", description: `${payload.name} (${payload.employeeCode}) was added.`, path: "/employees" });
++  }
++  employeeSaved = true;
++  if (formData.profilePhoto && user?.role === "ADMIN") {
++    const photoData = new FormData();
++    photoData.append("photo", formData.profilePhoto);
++    await api.post(`/employees/code/${encodeURIComponent(payload.employeeCode)}/photo`, photoData);
++  }
++  navigate("/employees");
++} catch (error) {
++      const responseMessage = typeof error?.response?.data === "string" ? error.response.data : error?.response?.data?.message;
++      if (employeeSaved) {
++        setSubmitError(`Employee details were saved, but the photo was not uploaded. ${responseMessage || "Please select the photo and try again."}`);
++        if (!isEditMode) navigate(`/employees/${encodeURIComponent(payload.employeeCode)}/edit`, { replace: true });
+       } else {
+-        await addEmployee(payload, { aadharDocument: formData.aadharFile, panDocument: formData.panFile });
+-        addActivity({ icon: "person_add", title: "New employee added", description: `${payload.name} (${payload.employeeCode}) was added.`, path: "/employees" });
++        setSubmitError(responseMessage || error.message || "Employee could not be saved. Check the details and try again.");
+       }
+-      navigate("/employees");
+-    } catch (error) {
+-      const responseMessage = typeof error?.response?.data === "string" ? error.response.data : error?.response?.data?.message;
+-      setSubmitError(responseMessage || "Employee could not be saved. Check the details and try again.");
+     } finally {
+       setSubmitting(false);
+     }
+@@ -255,11 +308,13 @@ const AddEmployee = () => {
+ 
+       <form onSubmit={handleSubmit} className="employee-form-card" noValidate>
+         <p className="required-note"><RequiredMark /> Required fields</p>
++        {!isEditMode && <p className="required-note">Firm: {selectedFirm ? `${selectedFirm.code} · ${selectedFirm.name || ""}` : "Select a firm in the top bar"}</p>}
++        <FieldError id="firmId-error" message={errors.firmId} />
+ 
+         <div className="form-section">
+           <div className="form-section-title"><span className="material-symbols-outlined section-icon">person</span><div><h3>Basic Details</h3><p>Enter the employee’s official information.</p></div></div>
+           <div className="form-grid">
+-            <div className="form-group"><label htmlFor="employeeCode">Employee Code <RequiredMark /></label><input id="employeeCode" name="employeeCode" value={formData.employeeCode} onChange={handleChange} maxLength={20} required disabled={isEditMode} {...inputState("employeeCode")} /><small>{isEditMode ? "Employee code cannot be changed after creation." : "Suggested automatically; uppercase letters, numbers, and hyphens only."}</small><FieldError id="employeeCode-error" message={errors.employeeCode} /></div>
++            <div className="form-group"><label htmlFor="employeeCode">Employee Code <RequiredMark /></label><input id="employeeCode" name="employeeCode" value={formData.employeeCode} onChange={handleChange} maxLength={20} required disabled={isEditMode} {...inputState("employeeCode")} /><small>{isEditMode ? "Employee code cannot be changed after creation." : "Enter the employee code assigned by your organization."}</small><FieldError id="employeeCode-error" message={errors.employeeCode} /></div>
+             <div className="form-group"><label htmlFor="name">Employee Name <RequiredMark /></label><input id="name" name="name" value={formData.name} onChange={handleChange} minLength={2} maxLength={100} required autoComplete="name" {...inputState("name")} /><FieldError id="name-error" message={errors.name} /></div>
+             <div className="form-group"><label htmlFor="designation">Designation <RequiredMark /></label><select id="designation" name="designation" value={formData.designation} onChange={handleChange} required {...inputState("designation")}><option value="">Select Designation</option>{designations.map((designation) => <option key={designation} value={designation}>{designation}</option>)}</select><FieldError id="designation-error" message={errors.designation} /></div>
+             <div className="form-group"><label htmlFor="department">Department <RequiredMark /></label><select id="department" name="department" value={formData.department} onChange={handleChange} required {...inputState("department")}><option value="">Select Department</option>{departments.map((department) => <option key={department} value={department}>{department}</option>)}</select><FieldError id="department-error" message={errors.department} /></div>
+@@ -290,6 +345,18 @@ const AddEmployee = () => {
+           </div>
+         </div>
+ 
++        <div className="form-section">
++          <div className="form-section-title"><span className="material-symbols-outlined section-icon">person_book</span><div><h3>Personal and Employment Details</h3><p>Add the employee’s personal information and employment type.</p></div></div>
++          <div className="form-grid">
++            {[['firstName', 'First Name', 'given-name'], ['lastName', 'Last Name', 'family-name']].map(([field, label, autocomplete]) => <div className="form-group" key={field}><label htmlFor={field}>{label}</label><input id={field} name={field} value={formData[field]} onChange={handleChange} maxLength={100} autoComplete={autocomplete} {...inputState(field)} /><FieldError id={`${field}-error`} message={errors[field]} /></div>)}
++            <div className="form-group"><label htmlFor="gender">Gender</label><select id="gender" name="gender" value={formData.gender} onChange={handleChange}><option value="">Select Gender</option>{["Male", "Female", "Other", "Prefer not to say"].map(value => <option key={value}>{value}</option>)}{formData.gender && !["Male", "Female", "Other", "Prefer not to say"].includes(formData.gender) && <option value={formData.gender}>{formData.gender}</option>}</select></div>
++            <div className="form-group"><label htmlFor="dateOfBirth">Date of Birth</label><input id="dateOfBirth" name="dateOfBirth" type="date" max={today} value={formData.dateOfBirth} onChange={handleChange} autoComplete="bday" {...inputState("dateOfBirth")} /><FieldError id="dateOfBirth-error" message={errors.dateOfBirth} /></div>
++            <div className="form-group"><label htmlFor="employmentType">Employment Type</label><input id="employmentType" name="employmentType" list="employment-types" maxLength={100} value={formData.employmentType} onChange={handleChange} placeholder="Select or enter employment type" /><datalist id="employment-types">{["Permanent", "Contract", "Temporary", "Apprentice", "Part-time"].map(value => <option value={value} key={value} />)}</datalist></div>
++            <div className="form-group"><label htmlFor="address">Address</label><textarea id="address" name="address" rows={3} maxLength={255} value={formData.address} onChange={handleChange} autoComplete="street-address" /></div>
++            {user?.role === "ADMIN" && <div className="form-group"><label htmlFor="profilePhoto">Profile Photo</label><input id="profilePhoto" name="profilePhoto" type="file" accept="image/jpeg,image/png,image/webp" onChange={handleFileChange} {...inputState("profilePhoto")} /><small>JPG, PNG or WEBP, up to 2 MB.</small>{formData.profilePhotoName && <small>Current photo: {formData.profilePhotoName}</small>}<FieldError id="profilePhoto-error" message={errors.profilePhoto} /></div>}
++          </div>
++        </div>
++
+         <div className="form-section">
+           <div className="form-section-title"><span className="material-symbols-outlined section-icon">verified_user</span><div><h3>KYC Details</h3><p>Aadhaar and PAN numbers and their PDF documents are required. Maximum file size: 5 MB each.</p></div></div>
+           <div className="form-grid">
+@@ -313,6 +380,10 @@ const AddEmployee = () => {
+         <div className="form-section">
+           <div className="form-section-title"><span className="material-symbols-outlined section-icon">account_balance_wallet</span><div><h3>Statutory Schemes</h3><p>Select schemes applicable to this employee.</p></div></div>
+           <div className="checkbox-grid">{statutorySchemes.map((scheme) => <label key={scheme.id} className="checkbox-card"><input type="checkbox" checked={formData.schemes.includes(scheme.id)} onChange={() => handleSchemeChange(scheme.id)} /><div><strong>{scheme.name}</strong><span>Employee {scheme.employee}% / Employer {scheme.employer}%</span></div></label>)}</div>
++          <div className="form-grid">
++            <div className="form-group"><label htmlFor="pfAccountNumber">PF Account Number</label><input id="pfAccountNumber" name="pfAccountNumber" maxLength={50} value={formData.pfAccountNumber} onChange={handleChange} /></div>
++            <div className="form-group"><label htmlFor="esiAccountNumber">ESI Account Number</label><input id="esiAccountNumber" name="esiAccountNumber" maxLength={50} value={formData.esiAccountNumber} onChange={handleChange} /></div>
++          </div>
+         </div>
+ 
+         <div className="form-section">
+diff --git a/frontend/src/pages/BackupRestore.jsx b/frontend/src/pages/BackupRestore.jsx
+index 7ca1803..65d4fa5 100644
+--- a/frontend/src/pages/BackupRestore.jsx
++++ b/frontend/src/pages/BackupRestore.jsx
+@@ -1,192 +1,204 @@
+-import React, { useEffect, useState } from "react";
++import React, { useEffect, useMemo, useRef, useState } from "react";
+ import { useNavigate } from "react-router-dom";
+ import api from "../api/axios";
+ import { useFirm } from "../context/FirmContext";
++import "../styles/backup-restore.css";
++
++const formatBytes = (bytes) => {
++  if (!bytes && bytes !== 0) return "";
++  if (bytes < 1024) return `${bytes} B`;
++  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
++  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
++};
++
++const formatDateTime = (value) => {
++  if (!value) return "Not available";
++  const date = new Date(value);
++  if (Number.isNaN(date.getTime())) return "Not available";
++  return new Intl.DateTimeFormat("en-IN", {
++    day: "2-digit",
++    month: "short",
++    year: "numeric",
++    hour: "2-digit",
++    minute: "2-digit",
++  }).format(date);
++};
++
++const Banner = ({ type, message, onDismiss }) => {
++  if (!message) return null;
++  const icon = type === "success" ? "check_circle" : "error";
++  return (
++    <div className={`backup-banner backup-banner-${type}`} role={type === "error" ? "alert" : "status"}>
++      <span className="material-symbols-outlined" aria-hidden="true">{icon}</span>
++      <span>{message}</span>
++      {onDismiss && (
++        <button type="button" className="backup-banner-dismiss" onClick={onDismiss} aria-label="Dismiss">
++          <span className="material-symbols-outlined" aria-hidden="true">close</span>
++        </button>
++      )}
++    </div>
++  );
++};
+ 
+ const BackupRestore = () => {
+   const navigate = useNavigate();
+   const { selectedFirm } = useFirm();
++  const fileInputRef = useRef(null);
++
+   const [success, setSuccess] = useState("");
++  const [createError, setCreateError] = useState("");
++  const [restoreError, setRestoreError] = useState("");
+   const [note, setNote] = useState("");
+   const [file, setFile] = useState(null);
+   const [backups, setBackups] = useState([]);
+-  const [version, setVersion] = useState("v0.1.0");
++  const [version, setVersion] = useState("");
+   const [creating, setCreating] = useState(false);
+   const [uploading, setUploading] = useState(false);
++  const [loadingBackups, setLoadingBackups] = useState(true);
++  const [historyError, setHistoryError] = useState("");
++  const [search, setSearch] = useState("");
++  const [dragging, setDragging] = useState(false);
++
++  const hasFirm = Boolean(selectedFirm?.code);
++  const busy = creating || uploading;
++  const sortedBackups = useMemo(() => [...backups].sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0)), [backups]);
++  const visibleBackups = sortedBackups.filter(backup => `${backup.note || ""} ${backup.version || ""} ${formatDateTime(backup.createdAt)}`.toLowerCase().includes(search.trim().toLowerCase()));
+ 
+   const loadBackups = async () => {
+     try {
++      setLoadingBackups(true);
++      setHistoryError("");
+       const res = await api.get("/backup/list");
+-      setBackups(res.data);
++      setBackups(Array.isArray(res.data) ? res.data : []);
+     } catch (err) {
+-      console.error(err);
++      setHistoryError("Could not load backup history. Please try again.");
++    } finally {
++      setLoadingBackups(false);
+     }
+   };
+ 
+   useEffect(() => {
+     loadBackups();
+-
+     api.get("/version")
+-      .then((res) => setVersion(res.data))
++      .then((res) => setVersion(typeof res.data === "string" ? res.data : res.data?.version || ""))
+       .catch(() => {});
+   }, []);
+ 
+   const createBackup = async () => {
++    if (!hasFirm || busy) return;
++    setCreateError("");
+     try {
+       setCreating(true);
+-
+-      await api.post("/backup/create", {
+-  firmCode: selectedFirm.code,
+-  note,
+-});
+-
++      await api.post("/backup/create", { firmCode: selectedFirm.code, note });
+       setNote("");
+-      loadBackups();
++      await loadBackups();
+       setSuccess("Backup created successfully.");
+-      setTimeout(() => setSuccess(""), 3000);
+-
+-    } catch {
+-      alert("Backup failed.");
++    } catch (err) {
++      setCreateError(err?.response?.data?.message || "Backup could not be created. Please try again.");
+     } finally {
+       setCreating(false);
+     }
+   };
+ 
++  const selectFile = (selected) => {
++    setRestoreError("");
++    if (selected && !selected.name.toLowerCase().endsWith(".sql")) {
++      setRestoreError("Please choose a .sql backup file.");
++      setFile(null);
++      if (fileInputRef.current) fileInputRef.current.value = "";
++      return;
++    }
++    setFile(selected);
++  };
++  const handleFileSelect = event => selectFile(event.target.files?.[0] || null);
++  const handleDrop = event => {
++    event.preventDefault();
++    setDragging(false);
++    if (busy) return;
++    if (event.dataTransfer.files.length !== 1) { setRestoreError("Please choose one backup file at a time."); return; }
++    selectFile(event.dataTransfer.files[0]);
++  };
++
++  const clearFile = () => {
++    setFile(null);
++    setRestoreError("");
++    if (fileInputRef.current) fileInputRef.current.value = "";
++  };
++
+   const uploadBackup = async () => {
+-    if (!file) return;
++    if (!file || !hasFirm || busy) return;
++    const confirmed = window.confirm(
++      "Restoring will overwrite current data for this firm with the contents of the uploaded file. This cannot be undone.\n\nContinue?"
++    );
++    if (!confirmed) return;
+ 
++    setRestoreError("");
+     try {
+       setUploading(true);
+-
+       const formData = new FormData();
+       formData.append("file", file);
+       formData.append("firmCode", selectedFirm.code);
+-
+       await api.post("/backup/restore", formData, {
+-        headers: {
+-          "Content-Type": "multipart/form-data",
+-        },
++        headers: { "Content-Type": "multipart/form-data" },
+       });
+-
+-      setFile(null);
+-      loadBackups();
+-    } catch {
+-      alert("Upload failed.");
++      clearFile();
++      await loadBackups();
++      setSuccess("Data restored successfully.");
++    } catch (err) {
++      setRestoreError(err?.response?.data?.message || "Restore failed. Check the file and try again.");
+     } finally {
+       setUploading(false);
+     }
+   };
+ 
+   return (
+-    <div className="settings-page">
+-
++    <div className="settings-page backup-restore-page">
+       <div className="page-header">
+-        <div>
+-          <h1>Backup & Restore</h1>
+-          <p>
+-  Selected Firm: <strong>{selectedFirm?.code || "No Firm Selected"}</strong> • Version <strong>{version}</strong>
+-</p>
+-        </div>
+-
+-        <button
+-          className="btn btn-secondary"
+-          onClick={() => navigate("/settings")}
+-        >
+-          <span className="material-symbols-outlined">
+-            arrow_back
+-          </span>
+-          Back
+-        </button>
++        <div><h1>Backup &amp; Restore</h1><p>Create a backup of your data or restore an existing backup file.</p></div>
++        <button className="btn btn-secondary" onClick={() => navigate("/settings")}><span className="material-symbols-outlined" aria-hidden="true">arrow_back</span>Back to Settings</button>
+       </div>
+ 
+-      <div className="backup-grid">
++      <section className="backup-context" aria-label="Backup information">
++        <div className="backup-context-firm"><span className="backup-context-icon material-symbols-outlined" aria-hidden="true">business</span><div><span>Selected Firm</span><strong>{selectedFirm?.name || selectedFirm?.code || "No firm selected"}</strong>{selectedFirm?.name && <small>{selectedFirm.code}</small>}</div></div>
++        <div><span>Latest Backup</span><strong>{loadingBackups ? "Loading..." : historyError ? "Not available" : sortedBackups.length ? formatDateTime(sortedBackups[0].createdAt) : "No backups yet"}</strong></div>
++        <div><span>Application Version</span><strong>{version || "Not available"}</strong></div>
++      </section>
+ 
+-        <section className="dashboard-card backup-card">
++      <Banner type="success" message={success} onDismiss={() => setSuccess("")} />
++      {!hasFirm && <Banner type="error" message="Select a firm from the top bar before creating or restoring a backup." />}
+ 
+-          <div className="card-header">
+-            <h3>Create a backup now</h3>
++      <div className="backup-grid">
++        <section className="dashboard-card backup-card">
++          <div className="backup-card-header"><span className="backup-card-icon material-symbols-outlined" aria-hidden="true">backup</span><div><h3>Create Backup</h3><p>Keep a copy of your current data.</p></div></div>
++          <div className="backup-card-body">
++            <p className="backup-description">Create a backup before making important changes to your records.</p>
++            <div className="backup-field"><label htmlFor="backup-note">Backup Note <span className="backup-optional">(optional)</span></label><textarea id="backup-note" value={note} onChange={event => setNote(event.target.value)} placeholder="Add a note to help you identify this backup" rows={4} maxLength={200} disabled={busy} /><div className="backup-field-help"><span>A short note makes backups easier to find.</span><span>{note.length}/200</span></div></div>
++            <Banner type="error" message={createError} onDismiss={() => setCreateError("")} />
+           </div>
+-
+-          <label>Note (Optional)</label>
+-
+-          <input
+-            value={note}
+-            onChange={(e) => setNote(e.target.value)}
+-            placeholder='Before August payroll finalization'
+-          />
+-
+-          <button
+-            className="btn btn-primary"
+-            onClick={createBackup}
+-            disabled={creating}
+-          >
+-            {creating ? "Creating..." : "Create Backup"}
+-          </button>
+-
++          <div className="backup-card-footer"><span className="backup-footer-note"><span className="material-symbols-outlined" aria-hidden="true">inventory_2</span>Appears in backup history</span><button className="primary-button backup-action-btn" onClick={createBackup} disabled={busy || !hasFirm}><span className={creating ? "material-symbols-outlined backup-spin" : "material-symbols-outlined"} aria-hidden="true">{creating ? "progress_activity" : "add"}</span>{creating ? "Creating..." : "Create Backup"}</button></div>
+         </section>
+ 
+         <section className="dashboard-card backup-card">
+-
+-          <div className="card-header">
+-            <h3>Restore from uploaded file</h3>
++          <div className="backup-card-header"><span className="backup-card-icon material-symbols-outlined" aria-hidden="true">settings_backup_restore</span><div><h3>Restore Backup</h3><p>Restore your data from a saved file.</p></div></div>
++          <div className="backup-card-body">
++            <input ref={fileInputRef} id="restore-file" type="file" accept=".sql" onChange={handleFileSelect} disabled={busy} hidden aria-label="Choose SQL backup file" />
++            <div className={dragging ? "backup-upload-area is-dragging" : "backup-upload-area"} onDragOver={event => { event.preventDefault(); if (!busy) setDragging(true); }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget)) setDragging(false); }} onDrop={handleDrop}>
++              {file ? <div className="backup-file-chip"><span className="material-symbols-outlined" aria-hidden="true">description</span><div className="backup-file-chip-info"><strong>{file.name}</strong><span>{formatBytes(file.size)} / SQL backup</span><button type="button" className="backup-text-button" disabled={busy} onClick={() => fileInputRef.current?.click()}>Choose a different file</button></div><button type="button" className="backup-file-chip-remove" disabled={busy} onClick={clearFile} aria-label="Remove selected file"><span className="material-symbols-outlined" aria-hidden="true">close</span></button></div> : <button type="button" className="backup-dropzone" disabled={busy} onClick={() => fileInputRef.current?.click()}><span className="material-symbols-outlined" aria-hidden="true">upload_file</span><strong>Choose a backup file</strong><span>or drag and drop it here</span><small>SQL files only (.sql)</small></button>}
++            </div>
++            <p className="backup-restore-notice"><span className="material-symbols-outlined" aria-hidden="true">info</span>Restoring replaces existing data. Keep a current backup before you continue.</p>
++            <Banner type="error" message={restoreError} onDismiss={() => setRestoreError("")} />
+           </div>
+-
+-          <p className="backup-note">
+-            Upload a .sql backup file from another installation.
+-          </p>
+-
+-          <input
+-            type="file"
+-            accept=".sql"
+-            onChange={(e) => setFile(e.target.files[0])}
+-          />
+-
+-          <button
+-            className="btn btn-primary"
+-            onClick={uploadBackup}
+-            disabled={uploading}
+-          >
+-            {uploading ? "Uploading..." : "Upload"}
+-          </button>
+-
++          <div className="backup-card-footer"><span className="backup-footer-note">{file ? "File ready to restore" : "Choose a file to continue"}</span><button className="primary-button backup-action-btn" onClick={uploadBackup} disabled={busy || !file || !hasFirm}><span className={uploading ? "material-symbols-outlined backup-spin" : "material-symbols-outlined"} aria-hidden="true">{uploading ? "progress_activity" : "settings_backup_restore"}</span>{uploading ? "Restoring..." : "Restore Backup"}</button></div>
+         </section>
+-
+       </div>
+ 
+-      <section className="dashboard-card">
+-
+-        <div className="card-header">
+-          <h3>All Backups (Versions)</h3>
+-        </div>
+-
+-        <table className="firms-table">
+-          <thead>
+-            <tr>
+-              <th>Created</th>
+-              <th>Version</th>
+-              <th>Note</th>
+-            </tr>
+-          </thead>
+-
+-          <tbody>
+-  {backups.length ? (
+-    backups.map((backup) => (
+-      <tr key={backup.id}>
+-        <td>{new Date(backup.createdAt).toLocaleString()}</td>
+-        <td>{backup.version}</td>
+-        <td>{backup.note || "-"}</td>
+-      </tr>
+-    ))
+-  ) : (
+-    <tr>
+-      <td colSpan="3">No backups yet.</td>
+-    </tr>
+-  )}
+-</tbody>
+-        </table>
+-
++      <section className="dashboard-card backup-history-card">
++        <div className="card-header"><div className="backup-history-title"><h3>Backup History</h3>{!loadingBackups && !historyError && <span className="backup-count">{backups.length}</span>}</div><button className="backup-text-button" onClick={loadBackups} disabled={loadingBackups || busy}><span className={loadingBackups ? "material-symbols-outlined backup-spin" : "material-symbols-outlined"} aria-hidden="true">refresh</span>Refresh</button></div>
++        <div className="backup-history-toolbar"><label className="backup-search"><span className="material-symbols-outlined" aria-hidden="true">search</span><input type="search" aria-label="Search backup history" placeholder="Search by note, date, or version" value={search} onChange={event => setSearch(event.target.value)} /></label><span>Newest first</span></div>
++        <div className="backup-table-scroll"><table className="backup-table"><thead><tr><th scope="col">Created On</th><th scope="col">Version</th><th scope="col">Backup Note</th></tr></thead><tbody>
++          {loadingBackups ? <tr><td colSpan="3"><div className="backup-empty" role="status"><span className="material-symbols-outlined backup-spin" aria-hidden="true">progress_activity</span><p>Loading backup history...</p></div></td></tr> : historyError ? <tr><td colSpan="3"><div className="backup-empty" role="alert"><span className="material-symbols-outlined" aria-hidden="true">cloud_off</span><h4>History is unavailable</h4><p>{historyError}</p><button className="backup-text-button" onClick={loadBackups}>Try Again</button></div></td></tr> : visibleBackups.length ? visibleBackups.map(backup => <tr key={backup.id}><td><span className="backup-history-date"><span className="material-symbols-outlined" aria-hidden="true">calendar_today</span>{formatDateTime(backup.createdAt)}</span></td><td><span className="backup-version-pill">{backup.version || "Not available"}</span></td><td className="backup-note-cell">{backup.note || <span className="backup-muted">No note added</span>}</td></tr>) : <tr><td colSpan="3"><div className="backup-empty"><span className="material-symbols-outlined" aria-hidden="true">{search ? "search_off" : "inventory_2"}</span><h4>{search ? "No matching backups" : "No backups yet"}</h4><p>{search ? "Try another search or clear the filter." : "Your backups will appear here after you create one."}</p>{search && <button className="backup-text-button" onClick={() => setSearch("")}>Clear Search</button>}</div></td></tr>}
++        </tbody></table></div>
+       </section>
+-
+     </div>
+   );
+ };
+diff --git a/frontend/src/pages/EmployeeProfile.jsx b/frontend/src/pages/EmployeeProfile.jsx
+index 622cf3f..d6152fd 100644
+--- a/frontend/src/pages/EmployeeProfile.jsx
++++ b/frontend/src/pages/EmployeeProfile.jsx
+@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
+ import { useNavigate, useParams } from "react-router-dom";
+ import api from "../api/axios";
+ import { hydrateEmployees, getEmployeeById, getEmployees } from "../data/employees";
++import PhotoViewerModal from "../components/PhotoViewerModal";
+ 
+ const DEFAULT_AVATAR = "https://ui-avatars.com/api/?name=Employee&background=0f172a&color=fff&size=128";
+ 
+@@ -49,26 +50,52 @@ const EmployeeProfile = () => {
+   const [error, setError] = useState("");
+   const [photoUrl, setPhotoUrl] = useState(DEFAULT_AVATAR);
+   const [uploading, setUploading] = useState(false);
++  const [viewingPhoto, setViewingPhoto] = useState(false);
++
++  // Self-editable fields
++  const [isEditing, setIsEditing] = useState(false);
++  const [saving, setSaving] = useState(false);
++  const [editError, setEditError] = useState("");
++  const [formData, setFormData] = useState({
++    contact: "",
++    address: "",
++    bankName: "",
++    accountNumber: "",
++    ifscCode: "",
++  });
++
++  const isSelfMode = !id;
+ 
+   const loadEmployee = async () => {
+     try {
+       setLoading(true);
+       setError("");
+-      await hydrateEmployees();
+-      const current = getEmployeeById(id) || getEmployees().find((item) => item.employeeCode === id || item.id === id);
+-      if (!current) {
+-        setError("Employee not found.");
+-        setEmployee(null);
+-        return;
+-      }
+ 
+-      setEmployee(current);
+-      const details = await api.get(`/employees/code/${encodeURIComponent(current.employeeCode || current.id)}`);
+-      const detailData = details.data || current;
+-      setEmployee(detailData);
++      let detailData;
++
++      if (isSelfMode) {
++        const details = await api.get(`/me/profile`);
++        detailData = details.data;
++        setEmployee(detailData);
++      } else {
++        await hydrateEmployees();
++        const current = getEmployeeById(id) || getEmployees().find((item) => item.employeeCode === id || item.id === id);
++        if (!current) {
++          setError("Employee not found.");
++          setEmployee(null);
++          return;
++        }
++        setEmployee(current);
++        const details = await api.get(`/employees/code/${encodeURIComponent(current.employeeCode || current.id)}`);
++        detailData = details.data || current;
++        setEmployee(detailData);
++      }
+ 
+       try {
+-        const photoResponse = await api.get(`/employees/code/${encodeURIComponent(detailData.employeeCode || detailData.id)}/photo`, { responseType: "blob" });
++        const photoUrlPath = isSelfMode
++          ? `/me/photo`
++          : `/employees/code/${encodeURIComponent(detailData.employeeCode || detailData.id)}/photo`;
++        const photoResponse = await api.get(photoUrlPath, { responseType: "blob" });
+         if (photoResponse.data && photoResponse.data.size > 0) {
+           setPhotoUrl(URL.createObjectURL(photoResponse.data));
+         } else {
+@@ -126,10 +153,14 @@ const EmployeeProfile = () => {
+ 
+     try {
+       setUploading(true);
+-      const code = employee?.employeeCode || employee?.id;
+-      const formData = new FormData();
+-      formData.append("photo", file);
+-      await api.post(`/employees/code/${encodeURIComponent(code)}/photo`, formData, {
++      const formDataObj = new FormData();
++      formDataObj.append("photo", file);
++
++      const uploadPath = isSelfMode
++        ? `/me/photo`
++        : `/employees/code/${encodeURIComponent(employee?.employeeCode || employee?.id)}/photo`;
++
++      await api.post(uploadPath, formDataObj, {
+         headers: { "Content-Type": "multipart/form-data" },
+       });
+       await loadEmployee();
+@@ -142,6 +173,57 @@ const EmployeeProfile = () => {
+     }
+   };
+ 
++  // --- Edit profile (self mode only) ---
++  const startEditing = () => {
++    setFormData({
++      contact: employee?.contact || "",
++      address: employee?.address || "",
++      bankName: employee?.bankName || "",
++      accountNumber: employee?.accountNumber || "",
++      ifscCode: employee?.ifscCode || "",
++    });
++    setEditError("");
++    setIsEditing(true);
++  };
++
++  const cancelEditing = () => {
++    setIsEditing(false);
++    setEditError("");
++  };
++
++  const handleFormChange = (field) => (event) => {
++    setFormData((prev) => ({ ...prev, [field]: event.target.value }));
++  };
++
++  const handleSaveProfile = async () => {
++    setEditError("");
++
++    // Basic client-side checks matching backend rules
++    if (formData.contact && !/^[6-9][0-9]{9}$/.test(formData.contact)) {
++      setEditError("Mobile number must be a valid 10-digit Indian mobile number.");
++      return;
++    }
++    if (formData.accountNumber && !/^[0-9]{9,18}$/.test(formData.accountNumber)) {
++      setEditError("Account number must be 9-18 digits.");
++      return;
++    }
++    if (formData.ifscCode && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(formData.ifscCode)) {
++      setEditError("Enter a valid IFSC code (e.g. HDFC0001234).");
++      return;
++    }
++
++    try {
++      setSaving(true);
++      await api.put(`/me/profile`, formData);
++      await loadEmployee();
++      setIsEditing(false);
++    } catch (err) {
++      setEditError(err?.response?.data?.message || "Unable to update profile.");
++    } finally {
++      setSaving(false);
++    }
++  };
++
+   if (loading) {
+     return <div className="employees-page"><div className="dashboard-card profile-state-card"><span className="material-symbols-outlined profile-state-icon">progress_activity</span><p>Loading employee profile…</p></div></div>;
+   }
+@@ -156,6 +238,8 @@ const EmployeeProfile = () => {
+ 
+   const personalDetails = [
+     { icon: "person", label: "Full name", value: displayName },
++    { icon: "person", label: "First name", value: displayValue(employee.firstName) },
++    { icon: "person", label: "Last name", value: displayValue(employee.lastName) },
+     { icon: "cake", label: "Date of birth", value: formatDate(employee.dateOfBirth) },
+     { icon: "wc", label: "Gender", value: displayValue(employee.gender) },
+     { icon: "call", label: "Mobile number", value: displayValue(employee.contact) },
+@@ -192,6 +276,8 @@ const EmployeeProfile = () => {
+   ];
+ 
+   const complianceDetails = [
++    { icon: "account_balance_wallet", label: "PF account number", value: displayValue(employee.pfAccountNumber) },
++    { icon: "health_and_safety", label: "ESI account number", value: displayValue(employee.esiAccountNumber) },
+     { icon: "fingerprint", label: "Aadhaar number", value: displayValue(employee.aadharNumber) },
+     { icon: "id_card", label: "PAN number", value: displayValue(employee.panNumber) },
+     { icon: "description", label: "Aadhaar document", value: employee.hasAadharDocument ? "Document on file" : "Not uploaded" },
+@@ -219,18 +305,102 @@ const EmployeeProfile = () => {
+     <div className="employees-page employee-profile-page">
+       <div className="page-header">
+         <div>
+-          <h1>Employee Profile</h1>
+-          <p>View personal and employment information.</p>
++          <h1>{isSelfMode ? "My Profile" : "Employee Profile"}</h1>
++          <p>{isSelfMode ? "View and manage your personal information." : "View personal and employment information."}</p>
++        </div>
++        <div style={{ display: "flex", gap: "8px" }}>
++          {isSelfMode && !isEditing && (
++            <button type="button" className="btn btn-primary" onClick={startEditing}>
++              <span className="material-symbols-outlined">edit</span>Edit Profile
++            </button>
++          )}
++          {!isSelfMode && (
++            <button type="button" className="btn btn-secondary" onClick={() => navigate("/employees")}>
++              <span className="material-symbols-outlined">arrow_back</span>Back
++            </button>
++          )}
+         </div>
+-        <button type="button" className="btn btn-secondary" onClick={() => navigate("/employees")}>
+-          <span className="material-symbols-outlined">arrow_back</span>Back
+-        </button>
+       </div>
+ 
++      {isSelfMode && isEditing && (
++        <section className="dashboard-card profile-details-card" aria-labelledby="edit-profile-heading">
++          <div className="profile-card-heading">
++            <span className="material-symbols-outlined" aria-hidden="true">edit</span>
++            <div><h3 id="edit-profile-heading">Edit contact &amp; bank details</h3><p>Other fields can only be changed by HR/Admin.</p></div>
++          </div>
++
++          {editError && (
++            <p style={{ color: "#b91c1c", marginBottom: "12px" }}>{editError}</p>
++          )}
++
++          <div className="profile-details-grid">
++            <div className="profile-detail-item">
++              <span className="profile-detail-label">Mobile number</span>
++              <input
++                type="text"
++                value={formData.contact}
++                onChange={handleFormChange("contact")}
++                placeholder="10-digit mobile number"
++                style={{ width: "100%", padding: "8px", marginTop: "4px" }}
++              />
++            </div>
++            <div className="profile-detail-item profile-detail-item-wide">
++              <span className="profile-detail-label">Address</span>
++              <input
++                type="text"
++                value={formData.address}
++                onChange={handleFormChange("address")}
++                placeholder="Your current address"
++                style={{ width: "100%", padding: "8px", marginTop: "4px" }}
++              />
++            </div>
++            <div className="profile-detail-item">
++              <span className="profile-detail-label">Bank name</span>
++              <input
++                type="text"
++                value={formData.bankName}
++                onChange={handleFormChange("bankName")}
++                placeholder="Bank name"
++                style={{ width: "100%", padding: "8px", marginTop: "4px" }}
++              />
++            </div>
++            <div className="profile-detail-item">
++              <span className="profile-detail-label">Account number</span>
++              <input
++                type="text"
++                value={formData.accountNumber}
++                onChange={handleFormChange("accountNumber")}
++                placeholder="Bank account number"
++                style={{ width: "100%", padding: "8px", marginTop: "4px" }}
++              />
++            </div>
++            <div className="profile-detail-item">
++              <span className="profile-detail-label">IFSC code</span>
++              <input
++                type="text"
++                value={formData.ifscCode}
++                onChange={handleFormChange("ifscCode")}
++                placeholder="e.g. HDFC0001234"
++                style={{ width: "100%", padding: "8px", marginTop: "4px" }}
++              />
++            </div>
++          </div>
++
++          <div style={{ display: "flex", gap: "8px", marginTop: "16px" }}>
++            <button type="button" className="btn btn-primary" onClick={handleSaveProfile} disabled={saving}>
++              {saving ? "Saving…" : "Save changes"}
++            </button>
++            <button type="button" className="btn btn-secondary" onClick={cancelEditing} disabled={saving}>
++              Cancel
++            </button>
++          </div>
++        </section>
++      )}
++
+       <section className="dashboard-card employee-profile-hero" aria-labelledby="employee-name">
+         <div className="profile-identity">
+           <div className="profile-photo-wrapper">
+-            <img src={photoUrl || DEFAULT_AVATAR} alt={`${displayName}'s profile`} className="profile-photo-large" onError={() => setPhotoUrl(DEFAULT_AVATAR)} />
++            <img src={photoUrl || DEFAULT_AVATAR} alt={`${displayName}'s profile`} className="profile-photo-large" onError={() => setPhotoUrl(DEFAULT_AVATAR)} style={{ cursor: photoUrl !== DEFAULT_AVATAR ? "zoom-in" : "default" }} onClick={() => photoUrl !== DEFAULT_AVATAR && setViewingPhoto(true)} />
+             <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={handlePhotoUpload} />
+             <button type="button" className="profile-photo-button" onClick={handlePhotoClick} disabled={uploading} aria-label={photoUrl !== DEFAULT_AVATAR ? "Change profile photo" : "Upload profile photo"}>
+               <span className="material-symbols-outlined" aria-hidden="true">{uploading ? "progress_activity" : "photo_camera"}</span>
+@@ -304,6 +474,10 @@ const EmployeeProfile = () => {
+           </div>
+           <div className="profile-details-grid">{renderDetails(complianceDetails)}</div>
+         </section>
++
++        {viewingPhoto && (
++  <PhotoViewerModal photoUrl={photoUrl} altText={`${displayName}'s profile`} onClose={() => setViewingPhoto(false)} />
++)}
+       </div>
+     </div>
+   );
+diff --git a/frontend/src/pages/Employees.jsx b/frontend/src/pages/Employees.jsx
+index 9986472..17c56dc 100644
+--- a/frontend/src/pages/Employees.jsx
++++ b/frontend/src/pages/Employees.jsx
+@@ -11,6 +11,7 @@ import {
+ import { addActivity } from "../data/activityLog";
+ import { useAuth } from "../context/AuthContext";
+ import { useFirm } from "../context/FirmContext";
++import { belongsToFirm } from "../utils/employeePortal";
+ 
+ /* =========================================
+    Employee Filter (Inline Component)
+@@ -20,6 +21,7 @@ const EmployeeFilter = ({
+   search,
+   setSearch,
+   department,
++  departmentOptions,
+   setDepartment,
+   status,
+   setStatus,
+@@ -49,10 +51,7 @@ const EmployeeFilter = ({
+         onChange={(e) => setDepartment(e.target.value)}
+       >
+         <option value="">All Departments</option>
+-        <option value="Engineering">Engineering</option>
+-        <option value="HR">HR</option>
+-        <option value="Production">Production</option>
+-        <option value="Finance">Finance</option>
++        {departmentOptions.map(name => <option key={name} value={name}>{name}</option>)}
+       </select>
+ 
+       {/* Status */}
+@@ -89,7 +88,8 @@ const EmployeeFilter = ({
+ ========================================= */
+ 
+ const Employees = () => {
+-  const { isAdmin } = useAuth();
++  const { user, isAdmin } = useAuth();
++  const canAddEmployee = isAdmin || user?.role === "SUPERVISOR";
+ 
+   /* =========================================
+      NAVIGATION
+@@ -102,19 +102,27 @@ const Employees = () => {
+      EMPLOYEE DATA
+   ========================================= */
+ 
+-  const [employees, setEmployees] = useState([]);
++  const [employeeRecords, setEmployees] = useState([]);
++  const [loadedFirmCode, setLoadedFirmCode] = useState(null);
++  const employees = useMemo(() => loadedFirmCode === selectedFirm?.code
++    ? employeeRecords.filter(employee => belongsToFirm(employee, selectedFirm)) : [],
++  [employeeRecords, loadedFirmCode, selectedFirm]);
+ 
+   useEffect(() => {
+ 
+     if (!selectedFirm?.code) return;
+ 
++    let active = true;
+     const loadEmployees = async () => {
+-      await hydrateEmployees(selectedFirm.code);
+-      setEmployees(getEmployees());
++      const records = await hydrateEmployees(selectedFirm.code);
++      if (!active) return;
++      setEmployees(records);
++      setLoadedFirmCode(selectedFirm.code);
+     };
+ 
+ 
+     loadEmployees();
++    return () => { active = false; };
+   }, [selectedFirm?.code]);
+ 
+ 
+@@ -261,7 +269,7 @@ const Employees = () => {
+           </p>
+         </div>
+ 
+-        {isAdmin && <button
++        {canAddEmployee && <button
+           type="button"
+           className="primary-button"
+           onClick={handleAddEmployee}
+@@ -340,6 +348,7 @@ const Employees = () => {
+ 
+         {/* Filter */}
+         <EmployeeFilter
++          departmentOptions={[...new Set(employees.map(employee => employee.department).filter(Boolean))].sort()}
+           search={search}
+           setSearch={setSearch}
+ 
+diff --git a/frontend/src/pages/Login.jsx b/frontend/src/pages/Login.jsx
+index 8542a97..5063281 100644
+--- a/frontend/src/pages/Login.jsx
++++ b/frontend/src/pages/Login.jsx
+@@ -1,51 +1,130 @@
+-import React, { useState } from "react";
+-import { useNavigate } from "react-router-dom";
++import React, { useEffect, useRef, useState } from "react";
++import { useNavigate, Link } from "react-router-dom";
+ import { useAuth } from "../context/AuthContext";
+ 
++const OTP_RESEND_SECONDS = 60;
++
++const routeForRole = (role) => {
++  const value = (role || "").toUpperCase();
++  if (value === "ADMIN") return "/dashboard";
++  if (value === "EMPLOYEE") return "/employee/dashboard";
++  return "/supervisor-dashboard";
++};
++
++const errorMessage = (err, fallback) =>
++  err?.response?.data?.message || err?.response?.data?.error || fallback;
++
+ const Login = () => {
+   const navigate = useNavigate();
+-  const { login } = useAuth();
++  const { login, requestOtp, verifyOtp } = useAuth();
+ 
+-  const [form, setForm] = useState({
+-    email: "",
+-    password: "",
+-  });
++  const [mode, setMode] = useState("password"); // "password" | "otp"
+ 
++  // Password (Admin) state
++  const [form, setForm] = useState({ email: "", password: "" });
+   const [error, setError] = useState("");
+   const [loading, setLoading] = useState(false);
++  const [showPassword, setShowPassword] = useState(false);
++
++  // OTP (Supervisor/Employee) state
++  const [mobile, setMobile] = useState("");
++  const [otpStep, setOtpStep] = useState("mobile"); // "mobile" | "code"
++  const [code, setCode] = useState("");
++  const [otpError, setOtpError] = useState("");
++  const [otpMessage, setOtpMessage] = useState("");
++  const [otpLoading, setOtpLoading] = useState(false);
++  const [cooldown, setCooldown] = useState(0);
++  const codeInputRef = useRef(null);
++
++  useEffect(() => {
++    if (cooldown <= 0) return undefined;
++    const timer = setInterval(() => setCooldown((s) => Math.max(0, s - 1)), 1000);
++    return () => clearInterval(timer);
++  }, [cooldown]);
++
++  useEffect(() => {
++    if (otpStep === "code") codeInputRef.current?.focus();
++  }, [otpStep]);
++
++  const switchMode = (next) => {
++    setMode(next);
++    setError("");
++    setOtpError("");
++    setOtpMessage("");
++  };
+ 
+   const handleChange = (e) => {
+-    setForm((prev) => ({
+-      ...prev,
+-      [e.target.name]: e.target.value,
+-    }));
++    setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+   };
+ 
+   const handleLogin = async (e) => {
+     e.preventDefault();
+     setError("");
+     setLoading(true);
+-
+     try {
+       const userData = await login(form.email, form.password);
++      navigate(routeForRole(userData.role), { replace: true });
++    } catch (err) {
++      setError(errorMessage(err, "Invalid email or password."));
++    } finally {
++      setLoading(false);
++    }
++  };
+ 
+-      const nextRoute =
+-        userData.role.toUpperCase() === "ADMIN"
+-          ? "/dashboard"
+-          : "/supervisor-dashboard";
++  const handleSendCode = async (e) => {
++    e.preventDefault();
++    setOtpError("");
++    setOtpMessage("");
++    setOtpLoading(true);
++    try {
++      await requestOtp(mobile);
++      setOtpStep("code");
++      setOtpMessage("We've sent a 6-digit code to your mobile number.");
++      setCooldown(OTP_RESEND_SECONDS);
++    } catch (err) {
++      setOtpError(errorMessage(err, "Could not send the code. Please try again."));
++    } finally {
++      setOtpLoading(false);
++    }
++  };
+ 
+-      navigate(nextRoute, { replace: true });
++  const handleResend = async () => {
++    if (cooldown > 0 || otpLoading) return;
++    setOtpError("");
++    setOtpMessage("");
++    setOtpLoading(true);
++    try {
++      await requestOtp(mobile);
++      setOtpMessage("We've sent a new code to your mobile number.");
++      setCooldown(OTP_RESEND_SECONDS);
+     } catch (err) {
+-      const message =
+-        err?.response?.data?.message ||
+-        err?.response?.data?.error ||
+-        "Invalid email or password.";
+-      setError(message);
++      setOtpError(errorMessage(err, "Could not resend the code. Please try again."));
+     } finally {
+-      setLoading(false);
++      setOtpLoading(false);
+     }
+   };
+ 
++  const handleVerify = async (e) => {
++    e.preventDefault();
++    setOtpError("");
++    setOtpLoading(true);
++    try {
++      const userData = await verifyOtp(mobile, code);
++      navigate(routeForRole(userData.role), { replace: true });
++    } catch (err) {
++      setOtpError(errorMessage(err, "Incorrect or expired code."));
++    } finally {
++      setOtpLoading(false);
++    }
++  };
++
++  const changeMobile = () => {
++    setOtpStep("mobile");
++    setCode("");
++    setOtpError("");
++    setOtpMessage("");
++  };
++
+   return (
+     <div className="auth-page">
+       <div className="auth-left">
+@@ -68,44 +147,148 @@ const Login = () => {
+           <h2>Welcome Back</h2>
+           <p>Sign in to continue to Marda Bang HRMS.</p>
+ 
+-          <form onSubmit={handleLogin} className="auth-form">
+-            <div className="form-group">
+-              <label>Email</label>
+-
+-              <input
+-                type="email"
+-                name="email"
+-                placeholder="Enter email"
+-                value={form.email}
+-                onChange={handleChange}
+-                required
+-              />
+-            </div>
+-
+-            <div className="form-group">
+-              <label>Password</label>
+-
+-              <input
+-                type="password"
+-                name="password"
+-                placeholder="Enter password"
+-                value={form.password}
+-                onChange={handleChange}
+-                required
+-              />
+-            </div>
+-
+-            {error && <div className="auth-error">{error}</div>}
+-
+-            <button className="auth-button" type="submit" disabled={loading}>
+-              {loading ? "Logging in..." : "Login"}
++          <div className="auth-tabs">
++            <button
++              type="button"
++              className={mode === "password" ? "active" : ""}
++              onClick={() => switchMode("password")}
++            >
++              Admin Login
++            </button>
++            <button
++              type="button"
++              className={mode === "otp" ? "active" : ""}
++              onClick={() => switchMode("otp")}
++            >
++              Employee / Supervisor Login
+             </button>
+-          </form>
++          </div>
++
++          {mode === "password" && (
++            <>
++              <form onSubmit={handleLogin} className="auth-form">
++                <div className="form-group">
++                  <label>Email</label>
++                  <input
++                    type="email"
++                    name="email"
++                    placeholder="Enter email"
++                    value={form.email}
++                    onChange={handleChange}
++                    required
++                  />
++                </div>
++
++                <div className="form-group">
++  <label>Password</label>
++  <div className="password-input-wrapper">
++    <input
++      type={showPassword ? "text" : "password"}
++      name="password"
++      placeholder="Enter password"
++      value={form.password}
++      onChange={handleChange}
++      required
++    />
++    <button
++      type="button"
++      className="password-toggle-btn"
++      onClick={() => setShowPassword((prev) => !prev)}
++      aria-label={showPassword ? "Hide password" : "Show password"}
++    >
++      <span className="material-symbols-outlined">{showPassword ? "visibility_off" : "visibility"}</span>
++    </button>
++  </div>
++</div>
++
++                {error && <div className="auth-error">{error}</div>}
++
++                <button className="auth-button" type="submit" disabled={loading}>
++                  {loading ? "Logging in..." : "Login"}
++                </button>
++              </form>
++
++              <div className="auth-footer">
++                <Link to="/forgot-password">Forgot password?</Link>
++              </div>
++            </>
++          )}
++
++          {mode === "otp" && otpStep === "mobile" && (
++            <form onSubmit={handleSendCode} className="auth-form">
++              <div className="form-group">
++                <label>Mobile Number</label>
++                <input
++                  type="tel"
++                  inputMode="numeric"
++                  placeholder="10-digit mobile number"
++                  value={mobile}
++                  maxLength={10}
++                  onChange={(e) => setMobile(e.target.value.replace(/\D/g, ""))}
++                  required
++                />
++              </div>
++
++              {otpError && <div className="auth-error">{otpError}</div>}
++
++              <button
++                className="auth-button"
++                type="submit"
++                disabled={otpLoading || mobile.length !== 10}
++              >
++                {otpLoading ? "Sending..." : "Send Code"}
++              </button>
++            </form>
++          )}
++
++          {mode === "otp" && otpStep === "code" && (
++            <form onSubmit={handleVerify} className="auth-form">
++              <p className="auth-otp-target">
++                Code sent to <strong>{mobile}</strong>.{" "}
++                <button type="button" className="auth-link-button" onClick={changeMobile}>
++                  Change number
++                </button>
++              </p>
++
++              <div className="form-group">
++                <label>Enter 6-digit Code</label>
++                <input
++                  ref={codeInputRef}
++                  type="tel"
++                  inputMode="numeric"
++                  placeholder="123456"
++                  value={code}
++                  maxLength={6}
++                  onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
++                  required
++                />
++              </div>
++
++              {otpMessage && <div className="auth-message">{otpMessage}</div>}
++              {otpError && <div className="auth-error">{otpError}</div>}
++
++              <button
++                className="auth-button"
++                type="submit"
++                disabled={otpLoading || code.length !== 6}
++              >
++                {otpLoading ? "Verifying..." : "Verify & Login"}
++              </button>
++
++              <button
++                type="button"
++                className="auth-link-button auth-resend"
++                onClick={handleResend}
++                disabled={cooldown > 0 || otpLoading}
++              >
++                {cooldown > 0 ? `Resend code in ${cooldown}s` : "Resend code"}
++              </button>
++            </form>
++          )}
+ 
+           <div className="auth-footer">
+             <span>Need an account? Contact your organization administrator.</span>
+           </div>
+-
+         </div>
+       </div>
+     </div>
+diff --git a/frontend/src/pages/Payments.jsx b/frontend/src/pages/Payments.jsx
+index 9488f67..46d6328 100644
+--- a/frontend/src/pages/Payments.jsx
++++ b/frontend/src/pages/Payments.jsx
+@@ -189,6 +189,11 @@ const Payments = () => {
+             record.netSalary || 0
+           ),
+ 
++        bonus: 
++          Number(
++            record.bonus || 0
++          ),
++
+         paymentMode:
+           formatPaymentMode(
+             record.paymentMode
+@@ -307,17 +312,10 @@ const Payments = () => {
+   }, [payments]);
+ 
+   const pendingAmount = useMemo(() => {
+-    return payments
+-      .filter(
+-        (payment) =>
+-          payment.status === "Finalized"
+-      )
+-      .reduce(
+-        (total, payment) =>
+-          total + payment.netSalary,
+-        0
+-      );
+-  }, [payments]);
++  return payments
++    .filter((payment) => payment.status !== "Paid")   // everything not yet paid
++    .reduce((total, payment) => total + payment.netSalary, 0);
++}, [payments]);
+ 
+   const employeeCount = useMemo(() => {
+     return new Set(
+diff --git a/frontend/src/pages/Profile.jsx b/frontend/src/pages/Profile.jsx
+index f661c42..6029ba8 100644
+--- a/frontend/src/pages/Profile.jsx
++++ b/frontend/src/pages/Profile.jsx
+@@ -1,16 +1,21 @@
+ import React from "react";
+ import { useNavigate } from "react-router-dom";
++import { useAuth } from "../context/AuthContext";
++import { useFirm } from "../context/FirmContext";
+ 
+ const Profile = () => {
+   const navigate = useNavigate();
++  const { user, isAdmin } = useAuth();
++  const { activeFirms } = useFirm();
+ 
+-  const user = JSON.parse(
+-    localStorage.getItem("user") || "{}"
+-  );
++  const userFirms = isAdmin
++    ? activeFirms
++    : activeFirms.filter((firm) =>
++        (user?.firms || []).includes(firm.code)
++      );
+ 
+   return (
+     <div>
+-
+       <div className="page-header">
+         <div>
+           <h1>My Profile</h1>
+@@ -18,68 +23,243 @@ const Profile = () => {
+         </div>
+       </div>
+ 
+-      <div className="card">
++      <div className="dashboard-card profile-card">
+ 
+-        <div className="profile-header">
++        {/* ============================================
++            IDENTITY HEADER
++        ============================================ */}
++        <div className="profile-identity">
+ 
+-          <div className="profile-avatar-large">
+-            {user.name
+-              ? user.name.charAt(0).toUpperCase()
+-              : "A"}
++          <div className="profile-avatar-circle">
++            {user?.fullName
++              ? user.fullName.charAt(0).toUpperCase()
++              : "U"}
+           </div>
+ 
+-          <div>
+-            <h2>
+-              {user.name || "Admin"}
+-            </h2>
++          <div className="profile-identity-text">
++            <h2>{user?.fullName || "User"}</h2>
+ 
+-            <p>
+-              {user.role || "ADMIN"}
+-            </p>
++            <span
++              className={`status-badge ${
++                isAdmin ? "status-active" : "status-warning"
++              }`}
++            >
++              {user?.role || "USER"}
++            </span>
+           </div>
+ 
+         </div>
+ 
+-        <div className="profile-details">
++        <hr className="profile-divider" />
+ 
+-          <div className="form-group">
+-            <label>Full Name</label>
+-            <input
+-              type="text"
+-              value={user.name || ""}
+-              readOnly
+-            />
+-          </div>
++        {/* ============================================
++            ACCOUNT DETAILS
++        ============================================ */}
++        <div className="profile-section">
+ 
+-          <div className="form-group">
+-            <label>Email Address</label>
+-            <input
+-              type="email"
+-              value={user.email || ""}
+-              readOnly
+-            />
+-          </div>
++          <h3 className="profile-section-title">
++            Account Details
++          </h3>
++
++          <div className="profile-fields-grid">
++
++            <div className="form-group">
++              <label>Full Name</label>
++              <div className="profile-static-field">
++                <span className="material-symbols-outlined">person</span>
++                {user?.fullName || "—"}
++              </div>
++            </div>
++
++            <div className="form-group">
++              <label>Email Address</label>
++              <div className="profile-static-field">
++                <span className="material-symbols-outlined">mail</span>
++                {user?.email || "—"}
++              </div>
++            </div>
++
++            <div className="form-group">
++              <label>Role</label>
++              <div className="profile-static-field">
++                <span className="material-symbols-outlined">badge</span>
++                {user?.role || "—"}
++              </div>
++            </div>
++
++            {user?.employeeCode && (
++              <div className="form-group">
++                <label>Employee Code</label>
++                <div className="profile-static-field">
++                  <span className="material-symbols-outlined">tag</span>
++                  {user.employeeCode}
++                </div>
++              </div>
++            )}
+ 
+-          <div className="form-group">
+-            <label>Role</label>
+-            <input
+-              type="text"
+-              value={user.role || ""}
+-              readOnly
+-            />
+           </div>
++        </div>
++
++        <hr className="profile-divider" />
++
++        {/* ============================================
++            FIRM ACCESS
++        ============================================ */}
++        <div className="profile-section">
++
++          <h3 className="profile-section-title">
++            {isAdmin ? "Firm Access" : "Assigned Firm"}
++          </h3>
++
++          {userFirms.length ? (
++            <div className="profile-firm-chips">
++              {userFirms.map((firm) => (
++                <span key={firm.code} className="profile-firm-chip">
++                  <span className="material-symbols-outlined">apartment</span>
++                  <span>
++                    <strong>{firm.code}</strong>
++                    <small>{firm.name}</small>
++                  </span>
++                </span>
++              ))}
++            </div>
++          ) : (
++            <p className="profile-empty-note">No firm assigned.</p>
++          )}
+ 
+         </div>
+ 
+-        <button
+-          className="btn btn-secondary"
+-          onClick={() => navigate("/dashboard")}
+-        >
+-          Back to Dashboard
+-        </button>
++        <div className="profile-actions">
++          <button
++            className="btn btn-secondary"
++            onClick={() => navigate("/dashboard")}
++          >
++            <span className="material-symbols-outlined">arrow_back</span>
++            Back to Dashboard
++          </button>
++        </div>
+ 
+       </div>
+ 
++      {/* ============================================
++          SCOPED STYLES
++      ============================================ */}
++      <style>{`
++        .profile-card {
++          max-width: 640px;
++          padding: 28px;
++        }
++
++        .profile-identity {
++          display: flex;
++          align-items: center;
++          gap: 18px;
++        }
++
++        .profile-avatar-circle {
++          width: 64px;
++          height: 64px;
++          border-radius: 50%;
++          background: linear-gradient(135deg, #e53935, #b71c1c);
++          color: #fff;
++          font-size: 26px;
++          font-weight: 700;
++          display: flex;
++          align-items: center;
++          justify-content: center;
++          flex-shrink: 0;
++        }
++
++        .profile-identity-text h2 {
++          margin: 0 0 6px 0;
++          font-size: 20px;
++        }
++
++        .profile-divider {
++          border: none;
++          border-top: 1px solid #eee;
++          margin: 22px 0;
++        }
++
++        .profile-section-title {
++          font-size: 13px;
++          text-transform: uppercase;
++          letter-spacing: 0.04em;
++          color: #888;
++          margin: 0 0 16px 0;
++        }
++
++        .profile-fields-grid {
++          display: grid;
++          grid-template-columns: 1fr 1fr;
++          gap: 16px 20px;
++        }
++
++        .profile-static-field {
++          display: flex;
++          align-items: center;
++          gap: 8px;
++          padding: 10px 12px;
++          background: #f7f7f8;
++          border-radius: 8px;
++          font-size: 14px;
++          color: #333;
++        }
++
++        .profile-static-field .material-symbols-outlined {
++          font-size: 18px;
++          color: #999;
++        }
++
++        .profile-firm-chips {
++          display: flex;
++          flex-wrap: wrap;
++          gap: 10px;
++        }
++
++        .profile-firm-chip {
++          display: flex;
++          align-items: center;
++          gap: 8px;
++          padding: 8px 14px;
++          background: #fff5f5;
++          border: 1px solid #ffd6d6;
++          border-radius: 20px;
++          font-size: 13px;
++        }
++
++        .profile-firm-chip .material-symbols-outlined {
++          font-size: 16px;
++          color: #d32f2f;
++        }
++
++        .profile-firm-chip strong {
++          display: block;
++          color: #b71c1c;
++        }
++
++        .profile-firm-chip small {
++          display: block;
++          color: #777;
++          font-size: 11px;
++        }
++
++        .profile-empty-note {
++          color: #999;
++          font-size: 14px;
++        }
++
++        .profile-actions {
++          margin-top: 24px;
++        }
++
++        @media (max-width: 640px) {
++          .profile-fields-grid {
++            grid-template-columns: 1fr;
++          }
++        }
++      `}</style>
++
+     </div>
+   );
+ };
+diff --git a/frontend/src/pages/Register.jsx b/frontend/src/pages/Register.jsx
+index df84fa6..c3dc01c 100644
+--- a/frontend/src/pages/Register.jsx
++++ b/frontend/src/pages/Register.jsx
+@@ -1,15 +1,14 @@
+ import React, { useState } from "react";
+-import { Link, useNavigate } from "react-router-dom";
+-import AuthLayout from "../components/AuthLayout";
++import { Link } from "react-router-dom";
+ import api from "../api/axios";
++import { registrationPayload, validateRegistration } from "../utils/userAccess";
+ 
+ const Register = () => {
+-  const navigate = useNavigate();
+-
+   const [showPassword, setShowPassword] = useState(false);
+   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+   const [error, setError] = useState("");
+   const [loading, setLoading] = useState(false);
++  const [success, setSuccess] = useState("");
+ 
+   const [formData, setFormData] = useState({
+     fullName: "",
+@@ -26,30 +25,31 @@ const Register = () => {
+ 
+     setFormData({
+       ...formData,
+-      [name]: value,
++      [name]: name === "mobile" ? value.replace(/\D/g, "").slice(0, 10) : value,
++      ...(name === "role" ? { password: "", confirmPassword: "" } : {}),
+     });
++    setError("");
++    setSuccess("");
+   };
+ 
+   const handleSubmit = async (e) => {
+     e.preventDefault();
+     setError("");
++    setSuccess("");
+ 
+-    if (formData.password !== formData.confirmPassword) {
+-      setError("Passwords do not match.");
++    const validationError = validateRegistration(formData);
++    if (validationError) {
++      setError(validationError);
+       return;
+     }
+ 
+     setLoading(true);
+     try {
+-      await api.post("/auth/register", {
+-        fullName: formData.fullName,
+-        email: formData.email,
+-        mobile: formData.mobile,
+-        employeeCode: formData.role === "INPUTER" ? formData.employeeCode : null,
+-        password: formData.password,
+-        role: formData.role,
+-      });
+-      navigate("/dashboard", { replace: true });
++      await api.post("/auth/register", registrationPayload(formData));
++      setSuccess(formData.role === "INPUTER"
++        ? "Supervisor account created. They can sign in using their registered mobile number and OTP. Their firm comes from the linked employee record."
++        : "Admin account created. They can sign in using their email and password.");
++      setFormData(current => ({ fullName: "", email: "", mobile: "", employeeCode: "", role: current.role, password: "", confirmPassword: "" }));
+     } catch (err) {
+       const response = err?.response?.data;
+       setError(
+@@ -62,10 +62,10 @@ const Register = () => {
+   };
+ 
+   return (
+-    <AuthLayout
+-      title="Create Account"
+-      subtitle="Admin-only account provisioning for approved organization staff"
+-    >
++    <div className="register-page">
++      <div className="page-header"><div><h1>User Access</h1><p>Create login accounts for approved organization staff.</p></div></div>
++      <section className="dashboard-card register-card">
++        <div className="register-brand"><img src="/mb_logo.svg" alt="Marda Bang" /><div><h2>Create Account</h2><p>Manage access to your organization.</p></div></div>
+       <form className="auth-form" onSubmit={handleSubmit}>
+ 
+         {/* Full Name */}
+@@ -78,6 +78,8 @@ const Register = () => {
+             placeholder="Enter your full name"
+             value={formData.fullName}
+             onChange={handleChange}
++            minLength={2}
++            maxLength={100}
+             required
+           />
+         </div>
+@@ -102,12 +104,17 @@ const Register = () => {
+ 
+           <input
+             type="tel"
++            inputMode="numeric"
++            minLength={10}
++            maxLength={10}
++            pattern="[6-9][0-9]{9}"
+             name="mobile"
+             placeholder="Enter mobile number"
+             value={formData.mobile}
+             onChange={handleChange}
+             required
+           />
++          <small>{formData.role === "INPUTER" ? "The supervisor will use this number for OTP login. Enter 10 digits without +91." : "Enter a 10-digit contact number without +91."}</small>
+         </div>
+ 
+         {/* Role */}
+@@ -120,7 +127,7 @@ const Register = () => {
+             onChange={handleChange}
+           >
+             <option value="ADMIN">Admin</option>
+-            <option value="INPUTER">Supervisor / Inputer</option>
++            <option value="INPUTER">Supervisor</option>
+           </select>
+         </div>
+ 
+@@ -135,11 +142,12 @@ const Register = () => {
+               onChange={handleChange}
+               required
+             />
+-            <small>The employee must be imported or created by an Admin first.</small>
++            <small>Use an active employee record without an existing login. Its firm will be assigned automatically. No password is needed for a supervisor.</small>
+           </div>
+         )}
+ 
+         {/* Password */}
++        {formData.role === "ADMIN" && <>
+         <div className="form-group">
+           <label>Password</label>
+ 
+@@ -159,6 +167,8 @@ const Register = () => {
+             <button
+               type="button"
+               className="password-toggle"
++              aria-label={showPassword ? "Hide password" : "Show password"}
++              aria-pressed={showPassword}
+               onClick={() => setShowPassword(!showPassword)}
+             >
+               <span className="material-symbols-outlined">
+@@ -189,6 +199,8 @@ const Register = () => {
+             <button
+               type="button"
+               className="password-toggle"
++              aria-label={showConfirmPassword ? "Hide confirmation password" : "Show confirmation password"}
++              aria-pressed={showConfirmPassword}
+               onClick={() =>
+                 setShowConfirmPassword(!showConfirmPassword)
+               }
+@@ -203,7 +215,9 @@ const Register = () => {
+           </div>
+         </div>
+ 
+-        {error && <div className="auth-error">{error}</div>}
++        </>}
++        {error && <div className="auth-error" role="alert">{error}</div>}
++        {success && <div className="auth-footer" role="status">{success}</div>}
+ 
+         <button type="submit" className="auth-button" disabled={loading}>
+           {loading ? "Creating Account..." : "Create Account"}
+@@ -214,8 +228,10 @@ const Register = () => {
+         </div>
+ 
+       </form>
+-    </AuthLayout>
++      </section>
++    </div>
+   );
+ };
+ 
+ export default Register;
++
+diff --git a/frontend/src/pages/Reports.jsx b/frontend/src/pages/Reports.jsx
+index 745ffea..a15b3c5 100644
+--- a/frontend/src/pages/Reports.jsx
++++ b/frontend/src/pages/Reports.jsx
+@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
+ import { getEmployees, hydrateEmployees } from "../data/employees";
+ import { useFirm } from "../context/FirmContext";
+ import api from "../api/axios";
++import * as XLSX from "xlsx";
+ 
+ const reportDefinitions = [
+   {
+@@ -42,23 +43,13 @@ const reportDefinitions = [
+ ];
+ 
+ const getDaysInMonth = (date) =>
+-  new Date(
+-    date.getFullYear(),
+-    date.getMonth() + 1,
+-    0
+-  ).getDate();
++  new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+ 
+-  const formatDate = (date) => {
++const formatDate = (date) => {
+   if (!date) return "";
+-
+-  const match = String(date).match(
+-    /^(\d{4})-(\d{2})-(\d{2})/
+-  );
+-
++  const match = String(date).match(/^(\d{4})-(\d{2})-(\d{2})/);
+   if (!match) return date;
+-
+   const [, year, month, day] = match;
+-
+   return `${day}/${month}/${year.slice(-2)}`;
+ };
+ 
+@@ -66,45 +57,56 @@ const getAttendanceLabel = (status) => {
+   switch (status) {
+     case "PRESENT":
+       return "P";
+-
+     case "LATE":
+       return "L";
+-
+     case "COMPLETED":
+       return "P";
+-
+     case "ABSENT":
+       return "A";
+-
+     case "PAID_LEAVE":
+       return "PL";
+-
+     case "WEEKLY_OFF":
+       return "WO";
+-
+     case "HOLIDAY":
+       return "H";
+-
+     case "PENDING":
+       return "-";
+-
+     default:
+       return "-";
+   }
+ };
+ 
+ const getEmployeeCode = (employee) =>
+-  employee?.employeeCode ||
+-  employee?.code ||
+-  employee?.id ||
+-  "";
++  employee?.employeeCode || employee?.code || employee?.id || "";
+ 
+ const numberValue = (value) => {
+   const number = Number(value);
+-
+   return Number.isFinite(number) ? number : 0;
+ };
+ 
++const directoryFieldDefinitions = [
++  { key: "employeeCode", label: "Employee ID", category: "Basic", getValue: (e) => getEmployeeCode(e), default: true },
++  { key: "name", label: "Name", category: "Basic", getValue: (e) => e.name, default: true },
++  { key: "department", label: "Department", category: "Basic", getValue: (e) => e.department, default: true },
++  { key: "designation", label: "Designation", category: "Basic", getValue: (e) => e.designation, default: true },
++  { key: "contact", label: "Contact", category: "Basic", getValue: (e) => e.contact, default: true },
++  { key: "email", label: "Email", category: "Basic", getValue: (e) => e.email, default: false },
++  { key: "gender", label: "Gender", category: "Basic", getValue: (e) => e.gender, default: false },
++  { key: "dateOfBirth", label: "Date of Birth", category: "Basic", getValue: (e) => formatDate(e.dateOfBirth), default: false },
++  { key: "address", label: "Address", category: "Basic", getValue: (e) => e.address, default: false },
++  { key: "status", label: "Status", category: "Basic", getValue: (e) => e.status, default: true },
++  { key: "employmentType", label: "Employment Type", category: "Employment", getValue: (e) => e.employmentType, default: false },
++  { key: "joiningDate", label: "Joining Date", category: "Employment", getValue: (e) => formatDate(e.joiningDate), default: false },
++  { key: "wageType", label: "Wage Type", category: "Salary", getValue: (e) => e.wageType, default: false },
++  { key: "monthlySalary", label: "Salary", category: "Salary", getValue: (e) => numberValue(e.monthlySalary), default: false },
++  { key: "paymentMode", label: "Payment Mode", category: "Salary", getValue: (e) => e.paymentMode, default: false },
++  { key: "bankName", label: "Bank Name", category: "Bank", getValue: (e) => e.bankName, default: false },
++  { key: "accountNumber", label: "Account Number", category: "Bank", getValue: (e) => e.accountNumber, default: false },
++  { key: "ifscCode", label: "IFSC Code", category: "Bank", getValue: (e) => e.ifscCode, default: false },
++  { key: "aadharNumber", label: "Aadhaar Number", category: "KYC", getValue: (e) => e.aadharNumber, default: false },
++  { key: "panNumber", label: "PAN Number", category: "KYC", getValue: (e) => e.panNumber, default: false },
++];
++
+ const Reports = () => {
+   const { selectedFirm: firm } = useFirm();
+ 
+@@ -112,27 +114,37 @@ const Reports = () => {
+   const [attendanceRecords, setAttendanceRecords] = useState([]);
+   const [salaryRecords, setSalaryRecords] = useState([]);
+ 
+-  const [loadingAttendance, setLoadingAttendance] =
+-    useState(false);
++  const [loadingAttendance, setLoadingAttendance] = useState(false);
++  const [loadingSalary, setLoadingSalary] = useState(false);
+ 
+-  const [loadingSalary, setLoadingSalary] =
+-    useState(false);
++  // Full-year attendance, only fetched when the Yearly Report is open
++  const [yearlyAttendanceRecords, setYearlyAttendanceRecords] = useState([]);
++  const [loadingYearlyAttendance, setLoadingYearlyAttendance] = useState(false);
+ 
+   const [errorMessage, setErrorMessage] = useState("");
+ 
+-  const [activeReportId, setActiveReportId] =
+-    useState(null);
++  const [activeReportId, setActiveReportId] = useState(null);
+ 
+   const [selectedMonth, setSelectedMonth] = useState(() => {
+     const now = new Date();
+-
+-    return `${now.getFullYear()}-${String(
+-      now.getMonth() + 1
+-    ).padStart(2, "0")}`;
++    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+   });
+ 
+-  const [selectedEmployeeId, setSelectedEmployeeId] =
+-    useState("");
++  const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
++
++  const [selectedDirectoryFields, setSelectedDirectoryFields] = useState(
++    directoryFieldDefinitions.filter((f) => f.default).map((f) => f.key)
++  );
++
++  const toggleDirectoryField = (key) => {
++    setSelectedDirectoryFields((current) =>
++      current.includes(key) ? current.filter((k) => k !== key) : [...current, key]
++    );
++  };
++
++  const [advanceLoanSummary, setAdvanceLoanSummary] = useState({ advance: 0, loan: 0, outstanding: 0 });
++  const [advanceLoanTransactions, setAdvanceLoanTransactions] = useState([]);
++  const [loadingAdvanceLoan, setLoadingAdvanceLoan] = useState(false);
+ 
+   /* =========================================
+      LOAD EMPLOYEES
+@@ -141,31 +153,24 @@ const Reports = () => {
+   useEffect(() => {
+     const loadEmployees = async () => {
+       try {
+-        await hydrateEmployees();
+-
++        await hydrateEmployees(firm?.code);
+         const loadedEmployees = getEmployees();
+-
+         setEmployees(loadedEmployees);
+ 
++        console.log('EMPLOYEES:', loadedEmployees);
++
+         if (loadedEmployees.length > 0) {
+           setSelectedEmployeeId(
+-            String(
+-              loadedEmployees[0]?.id ||
+-                loadedEmployees[0]?.employeeCode ||
+-                ""
+-            )
++            String(loadedEmployees[0]?.id || loadedEmployees[0]?.employeeCode || "")
+           );
+         }
+       } catch (error) {
+-        console.error(
+-          "Failed to load employees:",
+-          error
+-        );
++        console.error("Failed to load employees:", error);
+       }
+     };
+ 
+     loadEmployees();
+-  }, []);
++  }, [firm?.code]);
+ 
+   /* =========================================
+      LOAD ATTENDANCE FOR SELECTED MONTH
+@@ -179,50 +184,25 @@ const Reports = () => {
+       setErrorMessage("");
+ 
+       try {
+-        const [year, month] = selectedMonth
+-          .split("-")
+-          .map(Number);
+-
+-        const firstDay = `${year}-${String(month).padStart(
+-          2,
+-          "0"
+-        )}-01`;
+-
+-        const lastDayNumber = getDaysInMonth(
+-          new Date(year, month - 1, 1)
+-        );
+-
+-        const lastDay = `${year}-${String(month).padStart(
+-          2,
+-          "0"
+-        )}-${String(lastDayNumber).padStart(2, "0")}`;
+-
+-        const response = await api.get(
+-          "/attendance/range",
+-          {
+-            params: {
+-              from: firstDay,
+-              to: lastDay,
+-            },
+-          }
+-        );
+-
+-        setAttendanceRecords(
+-          Array.isArray(response.data)
+-            ? response.data
+-            : []
+-        );
++        const [year, month] = selectedMonth.split("-").map(Number);
++        const firstDay = `${year}-${String(month).padStart(2, "0")}-01`;
++        const lastDayNumber = getDaysInMonth(new Date(year, month - 1, 1));
++        const lastDay = `${year}-${String(month).padStart(2, "0")}-${String(lastDayNumber).padStart(2, "0")}`;
++
++        const response = await api.get("/attendance/range", {
++          params: {
++            from: firstDay,
++            to: lastDay,
++            ...(firm?.code ? { firmCode: firm.code } : {}),
++          },
++        });
++
++        setAttendanceRecords(Array.isArray(response.data) ? response.data : []);
+       } catch (error) {
+-        console.error(
+-          "Failed to load attendance report:",
+-          error
+-        );
+-
++        console.error("Failed to load attendance report:", error);
+         setAttendanceRecords([]);
+-
+         setErrorMessage(
+-          error?.response?.data?.message ||
+-            "Unable to load attendance report."
++          error?.response?.data?.message || "Unable to load attendance report."
+         );
+       } finally {
+         setLoadingAttendance(false);
+@@ -230,7 +210,39 @@ const Reports = () => {
+     };
+ 
+     loadAttendance();
+-  }, [selectedMonth]);
++  }, [selectedMonth, firm?.code]);
++
++  /* =========================================
++     LOAD FULL-YEAR ATTENDANCE (Yearly Report only)
++  ========================================= */
++
++  useEffect(() => {
++    const loadYearlyAttendance = async () => {
++      if (activeReportId !== "yearly") return;
++
++      const [year] = selectedMonth.split("-").map(Number);
++      if (!year) return;
++
++      setLoadingYearlyAttendance(true);
++      try {
++        const response = await api.get("/attendance/range", {
++          params: {
++            from: `${year}-01-01`,
++            to: `${year}-12-31`,
++            ...(firm?.code ? { firmCode: firm.code } : {}),
++          },
++        });
++        setYearlyAttendanceRecords(Array.isArray(response.data) ? response.data : []);
++      } catch (error) {
++        console.error("Failed to load yearly attendance report:", error);
++        setYearlyAttendanceRecords([]);
++      } finally {
++        setLoadingYearlyAttendance(false);
++      }
++    };
++
++    loadYearlyAttendance();
++  }, [activeReportId, selectedMonth, firm?.code]);
+ 
+   /* =========================================
+      LOAD SALARY RECORDS
+@@ -241,21 +253,13 @@ const Reports = () => {
+       setLoadingSalary(true);
+ 
+       try {
+-        const response = await api.get(
+-          "/payroll/payments"
+-        );
++        const response = await api.get("/payroll/payments", {
++          params: firm?.code ? { firmCode: firm.code } : {},
++        });
+ 
+-        setSalaryRecords(
+-          Array.isArray(response.data)
+-            ? response.data
+-            : []
+-        );
++        setSalaryRecords(Array.isArray(response.data) ? response.data : []);
+       } catch (error) {
+-        console.error(
+-          "Failed to load salary records:",
+-          error
+-        );
+-
++        console.error("Failed to load salary records:", error);
+         setSalaryRecords([]);
+       } finally {
+         setLoadingSalary(false);
+@@ -263,27 +267,75 @@ const Reports = () => {
+     };
+ 
+     loadSalaryRecords();
+-  }, []);
++  }, [firm?.code]);
++
++  const selectedEmployee = employees.find(
++    (employee) =>
++      String(employee?.id || employee?.employeeCode || "") ===
++      String(selectedEmployeeId)
++  );
+ 
+   /* =========================================
+-     ACTIVE REPORT
++     LOAD ADVANCE/LOAN DATA (Ledger Report only)
+   ========================================= */
+ 
+-  const activeReport = reportDefinitions.find(
+-    (report) => report.id === activeReportId
+-  );
++  useEffect(() => {
++  const loadAdvanceLoan = async () => {
++    if (activeReportId !== "ledger" || !selectedEmployee?.employeeDbId) {
++      setAdvanceLoanSummary({ advance: 0, loan: 0, outstanding: 0 });
++      setAdvanceLoanTransactions([]);
++      return;
++    }
++
++    const employeeId = selectedEmployee.employeeDbId;
++
++    setLoadingAdvanceLoan(true);
++    try {
++      const [summaryRes, historyRes] = await Promise.all([
++        api.get("/payroll/credits/outstanding", { params: { employeeId } }),
++        api.get("/payroll/credits/history", { params: { employeeId } }),
++      ]);
++
++      setAdvanceLoanSummary({
++        advance: numberValue(summaryRes.data?.advance),
++        loan: numberValue(summaryRes.data?.loan),
++        outstanding: numberValue(summaryRes.data?.outstanding),
++      });
++
++      const rows = (Array.isArray(historyRes.data) ? historyRes.data : []).map((entry) => {
++        const isIssue = entry.type === "ADVANCE_ISSUED" || entry.type === "LOAN_ISSUED";
++        return {
++          id: `credit-${entry.id}`,
++          date: entry.date,
++          type: entry.type === "ADVANCE_ISSUED" ? "Advance"
++              : entry.type === "LOAN_ISSUED" ? "Loan"
++              : entry.source === "PAYROLL_AUTO" ? "Repayment (Auto)"
++              : "Repayment",
++          description: entry.description || (isIssue ? "Issued" : "Repayment"),
++          credit: isIssue ? 0 : numberValue(entry.amount),
++          debit: isIssue ? numberValue(entry.amount) : 0,
++        };
++      });
++
++      setAdvanceLoanTransactions(rows);
++    } catch (error) {
++      console.error("Failed to load advance/loan data:", error);
++      setAdvanceLoanSummary({ advance: 0, loan: 0, outstanding: 0 });
++      setAdvanceLoanTransactions([]);
++    } finally {
++      setLoadingAdvanceLoan(false);
++    }
++  };
++
++  loadAdvanceLoan();
++}, [activeReportId, selectedEmployee]);
+ 
+   /* =========================================
+-     SELECTED EMPLOYEE
++     ACTIVE REPORT
+   ========================================= */
+ 
+-  const selectedEmployee = employees.find(
+-    (employee) =>
+-      String(
+-        employee?.id ||
+-          employee?.employeeCode ||
+-          ""
+-      ) === String(selectedEmployeeId)
++  const activeReport = reportDefinitions.find(
++    (report) => report.id === activeReportId
+   );
+ 
+   /* =========================================
+@@ -294,10 +346,7 @@ const Reports = () => {
+     const map = {};
+ 
+     attendanceRecords.forEach((record) => {
+-      const employeeCode = String(
+-        record.employeeCode || ""
+-      );
+-
++      const employeeCode = String(record.employeeCode || "");
+       const date = record.attendanceDate;
+ 
+       if (!employeeCode || !date) {
+@@ -328,14 +377,16 @@ const Reports = () => {
+         return false;
+       }
+ 
+-      return String(record.salaryMonth).startsWith(
+-        selectedMonth
+-      );
++      return String(record.salaryMonth).startsWith(selectedMonth);
+     });
+   }, [salaryRecords, selectedMonth]);
+ 
+   /* =========================================
+      FIND SALARY FOR EMPLOYEE
++     SalaryRecord.employeeId is the numeric database ID
++     (Employee.id) — never the employee code. employeeDbId
++     is preserved separately in mapEmployee specifically
++     for this match.
+   ========================================= */
+ 
+   const findSalaryForEmployee = (employee) => {
+@@ -343,24 +394,16 @@ const Reports = () => {
+       return null;
+     }
+ 
+-    const employeeId = employee?.id;
++    const dbId = employee?.employeeDbId;
+ 
+-    const employeeCode = getEmployeeCode(employee);
++    if (dbId == null) {
++      return null;
++    }
+ 
+     return (
+       monthlySalaryRecords.find(
+-        (record) =>
+-          employeeId != null &&
+-          String(record.employeeId) ===
+-            String(employeeId)
+-      ) ||
+-      monthlySalaryRecords.find(
+-        (record) =>
+-          employeeCode &&
+-          String(record.employeeId) ===
+-            String(employeeCode)
+-      ) ||
+-      null
++        (record) => String(record.employeeId) === String(dbId)
++      ) || null
+     );
+   };
+ 
+@@ -373,65 +416,58 @@ const Reports = () => {
+       return [];
+     }
+ 
+-    const salaryRecord =
+-      findSalaryForEmployee(selectedEmployee);
+-
+-    if (!salaryRecord) {
+-      return [];
+-    }
++    const salaryRecord = findSalaryForEmployee(selectedEmployee);
+ 
+     const transactions = [];
+ 
+-    if (numberValue(salaryRecord.netSalary) > 0) {
+-      transactions.push({
+-        id: `salary-${salaryRecord.id}`,
+-        date:
+-          salaryRecord.paymentDate ||
+-          salaryRecord.salaryMonth,
+-        type: "Salary",
+-        description: "Salary payment",
+-        credit: numberValue(
+-          salaryRecord.netSalary
+-        ),
+-        debit: 0,
+-      });
+-    }
++    if (salaryRecord) {
++      if (numberValue(salaryRecord.netSalary) > 0) {
++        transactions.push({
++          id: `salary-${salaryRecord.id}`,
++          date: salaryRecord.paymentDate || salaryRecord.salaryMonth,
++          type: "Salary",
++          description: "Salary payment",
++          credit: numberValue(salaryRecord.netSalary),
++          debit: 0,
++        });
++      }
+ 
+-    if (numberValue(salaryRecord.bonus) > 0) {
+-      transactions.push({
+-        id: `bonus-${salaryRecord.id}`,
+-        date: salaryRecord.salaryMonth,
+-        type: "Bonus",
+-        description: "Salary bonus",
+-        credit: numberValue(
+-          salaryRecord.bonus
+-        ),
+-        debit: 0,
+-      });
+-    }
++      if (numberValue(salaryRecord.bonus) > 0) {
++        transactions.push({
++          id: `bonus-${salaryRecord.id}`,
++          date: salaryRecord.salaryMonth,
++          type: "Bonus",
++          description: "Salary bonus",
++          credit: numberValue(salaryRecord.bonus),
++          debit: 0,
++        });
++      }
+ 
+-    if (numberValue(salaryRecord.deductions) > 0) {
+-      transactions.push({
+-        id: `deduction-${salaryRecord.id}`,
+-        date: salaryRecord.salaryMonth,
+-        type: "Deduction",
+-        description: "Salary deductions",
+-        credit: 0,
+-        debit: numberValue(
+-          salaryRecord.deductions
+-        ),
+-      });
++      if (numberValue(salaryRecord.deductions) > 0) {
++        transactions.push({
++          id: `deduction-${salaryRecord.id}`,
++          date: salaryRecord.salaryMonth,
++          type: "Deduction",
++          description: "Salary deductions",
++          credit: 0,
++          debit: numberValue(salaryRecord.deductions),
++        });
++      }
+     }
+ 
+-    return transactions.sort((a, b) =>
+-      String(a.date).localeCompare(
+-        String(b.date)
+-      )
++    const advanceLoanRows = advanceLoanTransactions.map((tx) => ({
++      id: tx.id,
++      date: tx.date,
++      type: tx.type,
++      description: tx.description,
++      credit: numberValue(tx.credit),
++      debit: numberValue(tx.debit),
++    }));
++
++    return [...transactions, ...advanceLoanRows].sort((a, b) =>
++      String(a.date).localeCompare(String(b.date))
+     );
+-  }, [
+-    selectedEmployee,
+-    monthlySalaryRecords,
+-  ]);
++  }, [selectedEmployee, monthlySalaryRecords, advanceLoanTransactions]);
+ 
+   /* =========================================
+      LEDGER ROWS
+@@ -440,17 +476,15 @@ const Reports = () => {
+   const ledgerRows = useMemo(() => {
+     let balance = 0;
+ 
+-    return ledgerTransactions.map(
+-      (transaction) => {
+-        balance += transaction.credit;
+-        balance -= transaction.debit;
++    return ledgerTransactions.map((transaction) => {
++      balance += transaction.credit;
++      balance -= transaction.debit;
+ 
+-        return {
+-          ...transaction,
+-          balance,
+-        };
+-      }
+-    );
++      return {
++        ...transaction,
++        balance,
++      };
++    });
+   }, [ledgerTransactions]);
+ 
+   /* =========================================
+@@ -459,26 +493,10 @@ const Reports = () => {
+ 
+   const ledgerSummary = useMemo(() => {
+     if (!selectedEmployee) {
+-      return {
+-        advance: 0,
+-        loan: 0,
+-        outstanding: 0,
+-      };
++      return { advance: 0, loan: 0, outstanding: 0 };
+     }
+-
+-    /*
+-     * Advance and loan APIs are not currently
+-     * available in the backend.
+-     *
+-     * Therefore we do not show fake values.
+-     */
+-
+-    return {
+-      advance: 0,
+-      loan: 0,
+-      outstanding: 0,
+-    };
+-  }, [selectedEmployee]);
++    return advanceLoanSummary;
++  }, [selectedEmployee, advanceLoanSummary]);
+ 
+   /* =========================================
+      REPORT DATA
+@@ -494,26 +512,13 @@ const Reports = () => {
+     ========================================= */
+ 
+     if (activeReportId === "monthly-presenty") {
+-      const [year, month] = selectedMonth
+-        .split("-")
+-        .map(Number);
++      const [year, month] = selectedMonth.split("-").map(Number);
+ 
+       const days = Array.from(
+-        {
+-          length: getDaysInMonth(
+-            new Date(year, month - 1, 1)
+-          ),
+-        },
++        { length: getDaysInMonth(new Date(year, month - 1, 1)) },
+         (_, index) => ({
+           number: index + 1,
+-
+-          date: `${year}-${String(month).padStart(
+-            2,
+-            "0"
+-          )}-${String(index + 1).padStart(
+-            2,
+-            "0"
+-          )}`,
++          date: `${year}-${String(month).padStart(2, "0")}-${String(index + 1).padStart(2, "0")}`,
+         })
+       );
+ 
+@@ -522,43 +527,19 @@ const Reports = () => {
+           "Employee",
+           "Employee ID",
+           "Department",
+-          ...days.map(
+-  (day) => formatDate(day.date)
+-),
++          ...days.map((day) => formatDate(day.date)),
+         ],
+ 
+-        /*
+-         * IMPORTANT:
+-         *
+-         * Do NOT filter by Active here.
+-         *
+-         * The Employees table can contain 13 employees
+-         * while only some are currently Active.
+-         *
+-         * Monthly Presenty should display all employees.
+-         */
+-
+         rows: employees.map((employee) => {
+-          const employeeCode = String(
+-            getEmployeeCode(employee)
+-          );
++          const employeeCode = String(getEmployeeCode(employee));
+ 
+           return [
+             employee.name,
+             employeeCode,
+             employee.department,
+-
+             ...days.map((day) => {
+-              const record =
+-                attendanceMap[employeeCode]?.[
+-                  day.date
+-                ];
+-
+-              return record
+-                ? getAttendanceLabel(
+-                    record.status
+-                  )
+-                : "-";
++              const record = attendanceMap[employeeCode]?.[day.date];
++              return record ? getAttendanceLabel(record.status) : "-";
+             }),
+           ];
+         }),
+@@ -582,13 +563,9 @@ const Reports = () => {
+         ],
+ 
+         rows: employees
+-          .filter(
+-            (employee) =>
+-              employee.status === "Active"
+-          )
++          .filter((employee) => employee.status === "Active")
+           .map((employee) => {
+-            const salaryRecord =
+-              findSalaryForEmployee(employee);
++            const salaryRecord = findSalaryForEmployee(employee);
+ 
+             if (!salaryRecord) {
+               return [
+@@ -603,25 +580,12 @@ const Reports = () => {
+             }
+ 
+             const gross =
+-              numberValue(
+-                salaryRecord.basicSalary
+-              ) +
+-              numberValue(
+-                salaryRecord.overtimeAmount
+-              ) +
+-              numberValue(
+-                salaryRecord.bonus
+-              );
+-
+-            const deductions =
+-              numberValue(
+-                salaryRecord.deductions
+-              );
+-
+-            const net =
+-              numberValue(
+-                salaryRecord.netSalary
+-              );
++              numberValue(salaryRecord.basicSalary) +
++              numberValue(salaryRecord.overtimeAmount) +
++              numberValue(salaryRecord.bonus);
++
++            const deductions = numberValue(salaryRecord.deductions);
++            const net = numberValue(salaryRecord.netSalary);
+ 
+             return [
+               getEmployeeCode(employee),
+@@ -630,8 +594,7 @@ const Reports = () => {
+               gross,
+               deductions,
+               net,
+-              salaryRecord.paymentStatus ||
+-                "PENDING",
++              salaryRecord.paymentStatus || "PENDING",
+             ];
+           }),
+       };
+@@ -642,24 +605,17 @@ const Reports = () => {
+     ========================================= */
+ 
+     if (activeReportId === "directory") {
+-      return {
+-        columns: [
+-          "Employee ID",
+-          "Name",
+-          "Department",
+-          "Designation",
+-          "Contact",
+-          "Status",
+-        ],
++      const activeFields = directoryFieldDefinitions.filter((f) =>
++        selectedDirectoryFields.includes(f.key)
++      );
+ 
+-        rows: employees.map((employee) => [
+-          getEmployeeCode(employee),
+-          employee.name,
+-          employee.department,
+-          employee.designation,
+-          employee.contact,
+-          employee.status,
+-        ]),
++      if (activeFields.length === 0) {
++        return { columns: [], rows: [] };
++      }
++
++      return {
++        columns: activeFields.map((f) => f.label),
++        rows: employees.map((employee) => activeFields.map((f) => f.getValue(employee))),
+       };
+     }
+ 
+@@ -668,9 +624,7 @@ const Reports = () => {
+     ========================================= */
+ 
+     if (activeReportId === "yearly") {
+-      const [selectedYear] = selectedMonth
+-        .split("-")
+-        .map(Number);
++      const [selectedYear] = selectedMonth.split("-").map(Number);
+ 
+       return {
+         columns: [
+@@ -684,98 +638,53 @@ const Reports = () => {
+         ],
+ 
+         rows: employees
+-          .filter(
+-            (employee) =>
+-              employee.status === "Active"
+-          )
++          .filter((employee) => employee.status === "Active")
+           .map((employee) => {
+-            const employeeCode = String(
+-              getEmployeeCode(employee)
+-            );
+-
+-            const employeeAttendance =
+-              attendanceRecords.filter(
+-                (record) => {
+-                  if (
+-                    String(
+-                      record.employeeCode
+-                    ) !== employeeCode
+-                  ) {
+-                    return false;
+-                  }
+-
+-                  if (
+-                    !record.attendanceDate
+-                  ) {
+-                    return false;
+-                  }
+-
+-                  return String(
+-                    record.attendanceDate
+-                  ).startsWith(
+-                    String(selectedYear)
+-                  );
+-                }
+-              );
+-
+-            const presentDays =
+-              employeeAttendance.filter(
+-                (record) =>
+-                  record.status ===
+-                    "PRESENT" ||
+-                  record.status ===
+-                    "COMPLETED" ||
+-                  record.status === "LATE"
+-              ).length;
+-
+-            const leaveDays =
+-              employeeAttendance.filter(
+-                (record) =>
+-                  record.status ===
+-                  "PAID_LEAVE"
+-              ).length;
+-
+-            const employeeSalaryRecords =
+-              salaryRecords.filter(
+-                (record) => {
+-                  if (
+-                    String(
+-                      record.employeeId
+-                    ) !== employeeCode &&
+-                    String(
+-                      record.employeeId
+-                    ) !==
+-                      String(employee.id)
+-                  ) {
+-                    return false;
+-                  }
+-
+-                  return String(
+-                    record.salaryMonth || ""
+-                  ).startsWith(
+-                    String(selectedYear)
+-                  );
+-                }
+-              );
++            const employeeCode = String(getEmployeeCode(employee));
++
++            const employeeAttendance = yearlyAttendanceRecords.filter((record) => {
++              if (String(record.employeeCode) !== employeeCode) {
++                return false;
++              }
++              if (!record.attendanceDate) {
++                return false;
++              }
++              return String(record.attendanceDate).startsWith(String(selectedYear));
++            });
++
++            const presentDays = employeeAttendance.filter(
++              (record) =>
++                record.status === "PRESENT" ||
++                record.status === "COMPLETED" ||
++                record.status === "LATE"
++            ).length;
++
++            const leaveDays = employeeAttendance.filter(
++              (record) => record.status === "PAID_LEAVE"
++            ).length;
++
++            const employeeSalaryRecords = salaryRecords.filter((record) => {
++              if (
++                employee.employeeDbId == null ||
++                String(record.employeeId) !== String(employee.employeeDbId)
++              ) {
++                return false;
++              }
++
++              return String(record.salaryMonth || "").startsWith(String(selectedYear));
++            });
+ 
+             const salaryMonths = new Set(
+-              employeeSalaryRecords.map(
+-                (record) =>
+-                  String(
+-                    record.salaryMonth
+-                  ).substring(0, 7)
++              employeeSalaryRecords.map((record) =>
++                String(record.salaryMonth).substring(0, 7)
+               )
+             );
+ 
+-            const monthsReported =
+-              new Set(
+-                employeeAttendance.map(
+-                  (record) =>
+-                    String(
+-                      record.attendanceDate
+-                    ).substring(0, 7)
+-                )
+-              );
++            const monthsReported = new Set(
++              employeeAttendance.map((record) =>
++                String(record.attendanceDate).substring(0, 7)
++              )
++            );
+ 
+             return [
+               getEmployeeCode(employee),
+@@ -798,20 +707,10 @@ const Reports = () => {
+     attendanceMap,
+     attendanceRecords,
+     salaryRecords,
++    yearlyAttendanceRecords,
++    selectedDirectoryFields,
+   ]);
+ 
+-  /* =========================================
+-     CSV ESCAPE
+-  ========================================= */
+-
+-  const escapeCsv = (value) => {
+-    const text = String(value ?? "");
+-
+-    return /[",\n]/.test(text)
+-      ? `"${text.replace(/"/g, '""')}"`
+-      : text;
+-  };
+-
+   /* =========================================
+      DOWNLOAD REPORT
+   ========================================= */
+@@ -826,34 +725,24 @@ const Reports = () => {
+       return;
+     }
+ 
+-    const csv = [
++    const worksheet = XLSX.utils.aoa_to_sheet([
+       reportData.columns,
+       ...reportData.rows,
+-    ]
+-      .map((row) =>
+-        row.map(escapeCsv).join(",")
+-      )
+-      .join("\n");
+-
+-    const url = URL.createObjectURL(
+-      new Blob([`\uFEFF${csv}`], {
+-        type: "text/csv;charset=utf-8;",
+-      })
+-    );
+-
+-    const link = document.createElement("a");
++    ]);
+ 
+-    link.href = url;
+-
+-    link.download = `${activeReport.id}-${selectedMonth}.csv`;
+-
+-    document.body.appendChild(link);
+-
+-    link.click();
++    // Auto-size columns roughly, based on the longest value per column
++    worksheet["!cols"] = reportData.columns.map((col, colIndex) => {
++      const maxLen = Math.max(
++        String(col ?? "").length,
++        ...reportData.rows.map((row) => String(row[colIndex] ?? "").length)
++      );
++      return { wch: Math.min(Math.max(maxLen + 2, 10), 40) };
++    });
+ 
+-    document.body.removeChild(link);
++    const workbook = XLSX.utils.book_new();
++    XLSX.utils.book_append_sheet(workbook, worksheet, activeReport.title.slice(0, 31));
+ 
+-    URL.revokeObjectURL(url);
++    XLSX.writeFile(workbook, `${activeReport.id}-${selectedMonth}.xlsx`);
+   };
+ 
+   /* =========================================
+@@ -866,17 +755,9 @@ const Reports = () => {
+     }
+ 
+     const rows = [
+-      [
+-        "Date",
+-        "Type",
+-        "Description",
+-        "Credit",
+-        "Debit",
+-        "Balance",
+-      ],
+-
++      ["Date", "Type", "Description", "Credit", "Debit", "Balance"],
+       ...ledgerRows.map((row) => [
+-        row.date,
++        formatDate(row.date),
+         row.type,
+         row.description,
+         row.credit,
+@@ -885,31 +766,15 @@ const Reports = () => {
+       ]),
+     ];
+ 
+-    const csv = rows
+-      .map((row) =>
+-        row.map(escapeCsv).join(",")
+-      )
+-      .join("\n");
+-
+-    const url = URL.createObjectURL(
+-      new Blob([`\uFEFF${csv}`], {
+-        type: "text/csv;charset=utf-8;",
+-      })
+-    );
+-
+-    const link = document.createElement("a");
+-
+-    link.href = url;
+-
+-    link.download = `ledger-${selectedEmployee.name}-${selectedMonth}.csv`;
+-
+-    document.body.appendChild(link);
+-
+-    link.click();
++    const worksheet = XLSX.utils.aoa_to_sheet(rows);
++    worksheet["!cols"] = [
++      { wch: 12 }, { wch: 12 }, { wch: 28 }, { wch: 14 }, { wch: 14 }, { wch: 14 },
++    ];
+ 
+-    document.body.removeChild(link);
++    const workbook = XLSX.utils.book_new();
++    XLSX.utils.book_append_sheet(workbook, worksheet, "Ledger");
+ 
+-    URL.revokeObjectURL(url);
++    XLSX.writeFile(workbook, `ledger-${selectedEmployee.name}-${selectedMonth}.xlsx`);
+   };
+ 
+   /* =========================================
+@@ -917,9 +782,7 @@ const Reports = () => {
+   ========================================= */
+ 
+   const handleReportClick = (reportId) => {
+-    setActiveReportId((current) =>
+-      current === reportId ? null : reportId
+-    );
++    setActiveReportId((current) => (current === reportId ? null : reportId));
+   };
+ 
+   /* =========================================
+@@ -928,675 +791,356 @@ const Reports = () => {
+ 
+   return (
+     <div className="reports-page">
+-
+-      {/* =====================================
+-          PAGE HEADER
+-      ===================================== */}
+-
++      {/* PAGE HEADER */}
+       <div className="page-header">
+         <div>
+           <h1>Reports</h1>
+-
+-          <p>
+-            Generate and review reports for the
+-            currently selected firm.
+-          </p>
++          <p>Generate and review reports for the currently selected firm.</p>
+         </div>
+       </div>
+ 
+-      {/* =====================================
+-          ERROR MESSAGE
+-      ===================================== */}
+-
+-      {errorMessage && (
+-        <div className="alert alert-danger">
+-          {errorMessage}
+-        </div>
+-      )}
+-
+-      {/* =====================================
+-          REPORT CARDS
+-      ===================================== */}
++      {errorMessage && <div className="alert alert-danger">{errorMessage}</div>}
+ 
++      {/* REPORT CARDS */}
+       <div className="reports-grid">
+         {reportDefinitions.map((report) => (
+           <button
+             type="button"
+             key={report.id}
+-            className={`report-card ${
+-              activeReportId === report.id
+-                ? "active"
+-                : ""
+-            }`}
+-            onClick={() =>
+-              handleReportClick(report.id)
+-            }
++            className={`report-card ${activeReportId === report.id ? "active" : ""}`}
++            onClick={() => handleReportClick(report.id)}
+           >
+             <span className="report-card-icon material-symbols-outlined">
+               {report.icon}
+             </span>
+-
+             <span className="report-card-content">
+               <strong>{report.title}</strong>
+-
+-              <span>
+-                {report.description}
+-              </span>
++              <span>{report.description}</span>
+             </span>
+-
+             <span className="report-card-action">
+-              {activeReportId === report.id
+-                ? "Close preview"
+-                : "Preview report"}
++              {activeReportId === report.id ? "Close preview" : "Preview report"}
+             </span>
+           </button>
+         ))}
+       </div>
+ 
+-      {/* =====================================
+-          LEDGER REPORT
+-      ===================================== */}
+-
++      {/* LEDGER REPORT */}
+       {activeReportId === "ledger" && (
+         <section className="ledger-report">
+-
+           <div className="ledger-header">
+-
+             <div className="ledger-title">
+-
+               <div className="ledger-title-icon">
+-                <span className="material-symbols-outlined">
+-                  account_balance
+-                </span>
++                <span className="material-symbols-outlined">account_balance</span>
+               </div>
+-
+               <div>
+                 <h2>Ledger Report</h2>
+-
+-                <p>
+-                  Financial transaction history
+-                  and outstanding balances.
+-                </p>
+-
++                <p>Financial transaction history and outstanding balances.</p>
+                 <span className="ledger-firm">
+-                  {firm?.name ||
+-                    firm?.code ||
+-                    "Selected Firm"}
++                  {firm?.name || firm?.code || "Selected Firm"}
+                 </span>
+               </div>
+-
+             </div>
+ 
+             <div className="ledger-actions">
+-
+               <div className="ledger-field">
+-
+-                <label>Employee</label>
+-
++                <label htmlFor="ledger-employee">Employee</label>
+                 <select
++                  id="ledger-employee"
+                   value={selectedEmployeeId}
+-                  onChange={(event) =>
+-                    setSelectedEmployeeId(
+-                      event.target.value
+-                    )
+-                  }
++                  onChange={(event) => setSelectedEmployeeId(event.target.value)}
+                 >
+-                  <option value="">
+-                    Select an employee
+-                  </option>
+-
+-                  {employees.map(
+-                    (employee) => (
+-                      <option
+-                        key={
+-                          employee.id ||
+-                          employee.employeeCode
+-                        }
+-                        value={
+-                          employee.id ||
+-                          employee.employeeCode
+-                        }
+-                      >
+-                        {employee.name}
+-                      </option>
+-                    )
+-                  )}
++                  <option value="">Select an employee</option>
++                  {employees.map((employee) => (
++                    <option
++                      key={employee.id || employee.employeeCode}
++                      value={employee.id || employee.employeeCode}
++                    >
++                      {employee.name}
++                    </option>
++                  ))}
+                 </select>
+-
+               </div>
+ 
+               <button
+                 type="button"
+                 className="btn btn-primary ledger-download"
+                 onClick={downloadLedger}
+-                disabled={!selectedEmployee}
++                disabled={!selectedEmployee || loadingAdvanceLoan}
+               >
+-                <span className="material-symbols-outlined">
+-                  download
+-                </span>
+-
+-                Download CSV
++                <span className="material-symbols-outlined">download</span>
++                Download Excel
+               </button>
+-
+             </div>
+-
+           </div>
+ 
+           {!selectedEmployee ? (
+             <div className="ledger-empty">
+-
+               <div className="ledger-empty-icon">
+-                <span className="material-symbols-outlined">
+-                  person_search
+-                </span>
++                <span className="material-symbols-outlined">person_search</span>
+               </div>
+-
+-              <h3>
+-                Select an employee
+-              </h3>
+-
+-              <p>
+-                Select an employee above to view
+-                their ledger statement.
+-              </p>
+-
++              <h3>Select an employee</h3>
++              <p>Select an employee above to view their ledger statement.</p>
+             </div>
+           ) : (
+             <>
+-              {/* EMPLOYEE BAR */}
+-
+               <div className="ledger-employee-bar">
+-
+                 <div className="ledger-avatar">
+-                  {selectedEmployee.name
+-                    ?.charAt(0)
+-                    ?.toUpperCase()}
++                  {selectedEmployee.name?.charAt(0)?.toUpperCase()}
+                 </div>
+-
+                 <div>
+-                  <span>
+-                    Ledger statement for
+-                  </span>
+-
+-                  <strong>
+-                    {selectedEmployee.name}
+-                  </strong>
+-
++                  <span>Ledger statement for</span>
++                  <strong>{selectedEmployee.name}</strong>
+                   <small>
+-                    {getEmployeeCode(
+-                      selectedEmployee
+-                    )}
+-
+-                    {selectedEmployee.department
+-                      ? ` • ${selectedEmployee.department}`
+-                      : ""}
++                    {getEmployeeCode(selectedEmployee)}
++                    {selectedEmployee.department ? ` • ${selectedEmployee.department}` : ""}
+                   </small>
+                 </div>
+-
+               </div>
+ 
+-              {/* OUTSTANDING BALANCES */}
+-
+               <div className="ledger-section-heading">
+-
+                 <div>
+-                  <h3>
+-                    Outstanding Balances
+-                  </h3>
+-
+-                  <p>
+-                    Current advance and loan
+-                    amounts for this employee.
+-                  </p>
++                  <h3>Outstanding Balances</h3>
++                  <p>Current advance and loan amounts for this employee.</p>
+                 </div>
+-
+               </div>
+ 
+               <div className="ledger-summary-grid">
+-
+                 <div className="ledger-summary-card">
+-
+                   <div className="ledger-summary-top">
+-
+                     <div className="ledger-summary-icon">
+-                      <span className="material-symbols-outlined">
+-                        payments
+-                      </span>
++                      <span className="material-symbols-outlined">payments</span>
+                     </div>
+-
+-                    <span className="ledger-summary-label">
+-                      Advance
+-                    </span>
+-
++                    <span className="ledger-summary-label">Advance</span>
+                   </div>
+-
+-                  <strong>
+-                    ₹
+-                    {ledgerSummary.advance.toLocaleString(
+-                      "en-IN"
+-                    )}
+-                  </strong>
+-
+-                  <span className="ledger-summary-note">
+-                    Outstanding advance
+-                  </span>
+-
++                  <strong>₹{ledgerSummary.advance.toLocaleString("en-IN")}</strong>
++                  <span className="ledger-summary-note">Outstanding advance</span>
+                 </div>
+ 
+                 <div className="ledger-summary-card">
+-
+                   <div className="ledger-summary-top">
+-
+                     <div className="ledger-summary-icon">
+-                      <span className="material-symbols-outlined">
+-                        account_balance
+-                      </span>
++                      <span className="material-symbols-outlined">account_balance</span>
+                     </div>
+-
+-                    <span className="ledger-summary-label">
+-                      Loan
+-                    </span>
+-
++                    <span className="ledger-summary-label">Loan</span>
+                   </div>
+-
+-                  <strong>
+-                    ₹
+-                    {ledgerSummary.loan.toLocaleString(
+-                      "en-IN"
+-                    )}
+-                  </strong>
+-
+-                  <span className="ledger-summary-note">
+-                    Outstanding loan
+-                  </span>
+-
++                  <strong>₹{ledgerSummary.loan.toLocaleString("en-IN")}</strong>
++                  <span className="ledger-summary-note">Outstanding loan</span>
+                 </div>
+ 
+                 <div className="ledger-summary-card ledger-summary-total">
+-
+                   <div className="ledger-summary-top">
+-
+                     <div className="ledger-summary-icon">
+-                      <span className="material-symbols-outlined">
+-                        account_balance_wallet
+-                      </span>
++                      <span className="material-symbols-outlined">account_balance_wallet</span>
+                     </div>
+-
+-                    <span className="ledger-summary-label">
+-                      Total Outstanding
+-                    </span>
+-
++                    <span className="ledger-summary-label">Total Outstanding</span>
+                   </div>
+-
+-                  <strong>
+-                    ₹
+-                    {ledgerSummary.outstanding.toLocaleString(
+-                      "en-IN"
+-                    )}
+-                  </strong>
+-
+-                  <span className="ledger-summary-note">
+-                    Amount currently outstanding
+-                  </span>
+-
++                  <strong>₹{ledgerSummary.outstanding.toLocaleString("en-IN")}</strong>
++                  <span className="ledger-summary-note">Amount currently outstanding</span>
+                 </div>
+-
+               </div>
+ 
+-              {/* FULL LEDGER */}
+-
+               <div className="ledger-section-heading ledger-history-heading">
+-
+                 <div>
+-
+-                  <h3>
+-                    Full Ledger Statement
+-                  </h3>
+-
++                  <h3>Full Ledger Statement</h3>
+                   <p>
+-                    Complete financial
+-                    transaction history for{" "}
+-                    <strong>
+-                      {selectedEmployee.name}
+-                    </strong>
+-                    .
++                    Complete financial transaction history for{" "}
++                    <strong>{selectedEmployee.name}</strong>.
+                   </p>
+-
+                 </div>
+-
+-                <span className="ledger-count">
+-                  {ledgerRows.length} Transactions
+-                </span>
+-
++                <span className="ledger-count">{ledgerRows.length} Transactions</span>
+               </div>
+ 
+               <div className="ledger-table-card">
+-
+                 <div className="ledger-table-wrapper">
+-
+                   <table className="ledger-table">
+-
+                     <thead>
+                       <tr>
+                         <th>Date</th>
+                         <th>Type</th>
+                         <th>Description</th>
+-
+-                        <th className="amount-column">
+-                          Credit
+-                        </th>
+-
+-                        <th className="amount-column">
+-                          Debit
+-                        </th>
+-
+-                        <th className="amount-column">
+-                          Balance
+-                        </th>
++                        <th className="amount-column">Credit</th>
++                        <th className="amount-column">Debit</th>
++                        <th className="amount-column">Balance</th>
+                       </tr>
+                     </thead>
+-
+                     <tbody>
+-
+                       {ledgerRows.length === 0 ? (
+                         <tr>
+-
+-                          <td
+-                            colSpan="6"
+-                            className="ledger-no-data"
+-                          >
+-                            No salary transactions
+-                            found for this employee
+-                            and month.
++                          <td colSpan="6" className="ledger-no-data">
++                            No salary transactions found for this employee and month.
+                           </td>
+-
+                         </tr>
+                       ) : (
+-                        ledgerRows.map(
+-                          (row) => (
+-                            <tr key={row.id}>
+-
+-                              <td>
+-                                <span className="ledger-date">
+-                                  {formatDate(row.date)}
+-                                </span>
+-                              </td>
+-
+-                              <td>
+-                                <span
+-                                  className={`ledger-type ledger-type-${row.type.toLowerCase()}`}
+-                                >
+-                                  {row.type}
+-                                </span>
+-                              </td>
+-
+-                              <td>
+-                                <div className="ledger-description">
+-                                  <strong>
+-                                    {
+-                                      row.description
+-                                    }
+-                                  </strong>
+-                                </div>
+-                              </td>
+-
+-                              <td className="amount-column credit">
+-                                {row.credit > 0
+-                                  ? `₹${row.credit.toLocaleString(
+-                                      "en-IN"
+-                                    )}`
+-                                  : "₹0"}
+-                              </td>
+-
+-                              <td className="amount-column debit">
+-                                {row.debit > 0
+-                                  ? `₹${row.debit.toLocaleString(
+-                                      "en-IN"
+-                                    )}`
+-                                  : "₹0"}
+-                              </td>
+-
+-                              <td className="amount-column balance">
+-                                ₹
+-                                {row.balance.toLocaleString(
+-                                  "en-IN"
+-                                )}
+-                              </td>
+-
+-                            </tr>
+-                          )
+-                        )
++                        ledgerRows.map((row) => (
++                          <tr key={row.id}>
++                            <td>
++                              <span className="ledger-date">{formatDate(row.date)}</span>
++                            </td>
++                            <td>
++                              <span className={`ledger-type ledger-type-${row.type.toLowerCase()}`}>
++                                {row.type}
++                              </span>
++                            </td>
++                            <td>
++                              <div className="ledger-description">
++                                <strong>{row.description}</strong>
++                              </div>
++                            </td>
++                            <td className="amount-column credit">
++                              {row.credit > 0 ? `₹${row.credit.toLocaleString("en-IN")}` : "₹0"}
++                            </td>
++                            <td className="amount-column debit">
++                              {row.debit > 0 ? `₹${row.debit.toLocaleString("en-IN")}` : "₹0"}
++                            </td>
++                            <td className="amount-column balance">
++                              ₹{row.balance.toLocaleString("en-IN")}
++                            </td>
++                          </tr>
++                        ))
+                       )}
+-
+                     </tbody>
+-
+                   </table>
+-
+                 </div>
+ 
+                 <div className="ledger-table-footer">
+-
+                   <span>
+-                    Showing{" "}
+-                    {ledgerRows.length}{" "}
+-                    transaction
+-                    {ledgerRows.length !== 1
+-                      ? "s"
+-                      : ""}
++                    Showing {ledgerRows.length} transaction{ledgerRows.length !== 1 ? "s" : ""}
+                   </span>
+-
+                   <span>
+                     Current balance:
+-
+                     <strong>
+-                      ₹
+-                      {(
+-                        ledgerRows[
+-                          ledgerRows.length - 1
+-                        ]?.balance || 0
+-                      ).toLocaleString(
+-                        "en-IN"
+-                      )}
++                      ₹{(ledgerRows[ledgerRows.length - 1]?.balance || 0).toLocaleString("en-IN")}
+                     </strong>
+                   </span>
+-
+                 </div>
+-
+               </div>
+-
+             </>
+           )}
+-
+         </section>
+       )}
+ 
+-      {/* =====================================
+-          NORMAL REPORT PREVIEW
+-      ===================================== */}
+-
+-      {activeReportId &&
+-        activeReportId !== "ledger" &&
+-        reportData &&
+-        activeReport && (
+-          <section className="dashboard-card report-preview-card">
+-
+-            <div className="report-preview-header">
+-
++      {/* NORMAL REPORT PREVIEW */}
++      {activeReportId && activeReportId !== "ledger" && reportData && activeReport && (
++        <section className="dashboard-card report-preview-card">
++          <div className="report-preview-header">
++            <div className="report-preview-title">
++              <span className="report-preview-icon material-symbols-outlined" aria-hidden="true">
++                {activeReport.icon}
++              </span>
+               <div>
+-
+-                <h2>
+-                  {activeReport.title}
+-                </h2>
+-
+-                <p>
+-                  Preview for{" "}
+-                  {firm?.code ||
+-                    "selected firm"}{" "}
+-                  before downloading.
+-                </p>
+-
+-              </div>
+-
+-              <div className="report-preview-actions">
+-
+-                {(activeReportId ===
+-                  "monthly-presenty" ||
+-                  activeReportId ===
+-                    "salary-summary" ||
+-                  activeReportId ===
+-                    "yearly") && (
+-                  <label>
+-
+-                    {activeReportId ===
+-                    "yearly"
+-                      ? "Year"
+-                      : "Month"}
+-
+-                    {activeReportId ===
+-                    "yearly" ? (
+-                      <input
+-                        type="number"
+-                        min="2000"
+-                        max="2100"
+-                        value={selectedMonth.substring(
+-                          0,
+-                          4
+-                        )}
+-                        onChange={(event) => {
+-                          const year =
+-                            event.target
+-                              .value;
+-
+-                          const currentMonth =
+-                            selectedMonth.substring(
+-                              5,
+-                              7
+-                            ) || "01";
+-
+-                          setSelectedMonth(
+-                            `${year}-${currentMonth}`
+-                          );
+-                        }}
+-                      />
+-                    ) : (
+-                      <input
+-                        type="month"
+-                        value={selectedMonth}
+-                        onChange={(event) =>
+-                          setSelectedMonth(
+-                            event.target.value
+-                          )
+-                        }
+-                      />
+-                    )}
+-
+-                  </label>
+-                )}
+-
+-                {(loadingAttendance ||
+-                  loadingSalary) && (
+-                  <span>
+-                    Loading...
+-                  </span>
+-                )}
+-
+-                <button
+-                  type="button"
+-                  className="btn btn-primary"
+-                  onClick={downloadReport}
+-                  disabled={
+-                    loadingAttendance ||
+-                    loadingSalary
+-                  }
+-                >
+-                  <span className="material-symbols-outlined">
+-                    download
+-                  </span>
+-
+-                  Download CSV
+-                </button>
+-
++                <h2>{activeReport.title}</h2>
++                <p>{activeReport.description}</p>
++                <span className="ledger-firm">{firm?.name || firm?.code || "Selected Firm"}</span>
+               </div>
+-
+             </div>
+ 
+-            <div className="report-preview-table-wrapper">
+-
+-              <table className="report-preview-table">
+-
+-                <thead>
+-                  <tr>
+-                    {reportData.columns.map(
+-                      (column) => (
+-                        <th key={column}>
+-                          {column}
+-                        </th>
+-                      )
+-                    )}
+-                  </tr>
+-                </thead>
+-
+-                <tbody>
+-
+-                  {reportData.rows.length ===
+-                  0 ? (
+-                    <tr>
+-
+-                      <td
+-                        colSpan={
+-                          reportData
+-                            .columns.length
+-                        }
+-                      >
+-                        No data found.
+-                      </td>
+-
+-                    </tr>
++            <div className="report-preview-actions">
++              {(activeReportId === "monthly-presenty" ||
++                activeReportId === "salary-summary" ||
++                activeReportId === "yearly") && (
++                <label>
++                  {activeReportId === "yearly" ? "Year" : "Month"}
++                  {activeReportId === "yearly" ? (
++                    <input
++                      type="number"
++                      min="2000"
++                      max="2100"
++                      value={selectedMonth.substring(0, 4)}
++                      onChange={(event) => {
++                        const year = event.target.value;
++                        const currentMonth = selectedMonth.substring(5, 7) || "01";
++                        setSelectedMonth(`${year}-${currentMonth}`);
++                      }}
++                    />
+                   ) : (
+-                    reportData.rows.map(
+-                      (
+-                        row,
+-                        rowIndex
+-                      ) => (
+-                        <tr
+-                          key={rowIndex}
+-                        >
+-                          {row.map(
+-                            (
+-                              value,
+-                              columnIndex
+-                            ) => (
+-                              <td
+-                                key={`${rowIndex}-${columnIndex}`}
+-                              >
+-                                {typeof value ===
+-                                  "number" &&
+-                                columnIndex >
+-                                  2
+-                                  ? value.toLocaleString(
+-                                      "en-IN"
+-                                    )
+-                                  : value}
+-                              </td>
+-                            )
+-                          )}
+-                        </tr>
+-                      )
+-                    )
++                    <input
++                      type="month"
++                      value={selectedMonth}
++                      onChange={(event) => setSelectedMonth(event.target.value)}
++                    />
+                   )}
++                </label>
++              )}
+ 
+-                </tbody>
+-
+-              </table>
++              {(loadingAttendance || loadingSalary || loadingYearlyAttendance) && (
++                <span>Loading...</span>
++              )}
+ 
++              <button
++                type="button"
++                className="btn btn-primary"
++                onClick={downloadReport}
++                disabled={loadingAttendance || loadingSalary || loadingYearlyAttendance}
++              >
++                <span className="material-symbols-outlined">download</span>
++                Download CSV
++              </button>
+             </div>
++          </div>
+ 
+-          </section>
+-        )}
++          {activeReportId === "directory" && (
++            <div className="report-directory-fields">
++              <h3>Choose fields to include</h3>
++              {["Basic", "Employment", "Salary", "Bank", "KYC"].map((category) => (
++                <div key={category} className="report-directory-group">
++                  <p>
++                    {category}
++                  </p>
++                  <div className="report-directory-options">
++                    {directoryFieldDefinitions
++                      .filter((f) => f.category === category)
++                      .map((f) => (
++                        <label
++                          key={f.key}
++                        >
++                          <input
++                            type="checkbox"
++                            checked={selectedDirectoryFields.includes(f.key)}
++                            onChange={() => toggleDirectoryField(f.key)}
++                          />
++                          {f.label}
++                        </label>
++                      ))}
++                  </div>
++                </div>
++              ))}
++            </div>
++          )}
+ 
++          <div className="report-preview-table-wrapper">
++            <table className="report-preview-table">
++              <thead>
++                <tr>
++                  {reportData.columns.map((column) => (
++                    <th key={column}>{column}</th>
++                  ))}
++                </tr>
++              </thead>
++              <tbody>
++                {reportData.rows.length === 0 ? (
++                  <tr>
++                    <td colSpan={reportData.columns.length}>No data found.</td>
++                  </tr>
++                ) : (
++                  reportData.rows.map((row, rowIndex) => (
++                    <tr key={rowIndex}>
++                      {row.map((value, columnIndex) => (
++                        <td key={`${rowIndex}-${columnIndex}`}>
++                          {typeof value === "number" && columnIndex > 2
++                            ? value.toLocaleString("en-IN")
++                            : value}
++                        </td>
++                      ))}
++                    </tr>
++                  ))
++                )}
++              </tbody>
++            </table>
++          </div>
++        </section>
++      )}
+     </div>
+   );
+ };
+ 
+ export default Reports;
+-
+diff --git a/frontend/src/pages/Salary.jsx b/frontend/src/pages/Salary.jsx
+index 8e23939..a2932ff 100644
+--- a/frontend/src/pages/Salary.jsx
++++ b/frontend/src/pages/Salary.jsx
+@@ -83,7 +83,9 @@ const Salary = () => {
+       setEmployeeLoading(true);
+       setEmployeeError("");
+ 
+-      const response = await api.get("/employees");
++      const response = await api.get("/employees", {
++        params: selectedFirm?.code ? { firmCode: selectedFirm.code } : {},
++      });
+ 
+       const employeeList = Array.isArray(response.data)
+         ? response.data
+@@ -105,38 +107,38 @@ const Salary = () => {
+ 
+   useEffect(() => {
+     loadEmployees();
+-  }, []);
++  }, [selectedFirm?.code]);
+ 
+   // --------------------------------------------------
+-  // Load finalized salaries
++  // Load all salary statuses so pending payroll can be finalized here.
+   // --------------------------------------------------
+ 
+-  const loadFinalizedSalaries = async () => {
++  const loadSalaryRecords = async () => {
+     try {
+       setLoading(true);
+       setError("");
+ 
+-      const response = await api.get("/payroll/finalized", {
+-        params: {
+-          month: monthValue,
+-        },
++      const response = await api.get("/payroll/payments", {
++        params: selectedFirm?.code ? { firmCode: selectedFirm.code } : {},
+       });
+ 
+       const records = Array.isArray(response.data)
+         ? response.data
+         : [];
+ 
+-      setSalaryRecords(records);
++      setSalaryRecords(records.filter((record) =>
++        String(record?.salaryMonth || "").substring(0, 7) === monthValue.substring(0, 7)
++      ));
+     } catch (err) {
+       console.error(
+-        "Failed to load finalized salaries:",
++        "Failed to load salary records:",
+         err
+       );
+ 
+       const message =
+         err?.response?.data?.message ||
+         err?.response?.data?.error ||
+-        "Failed to load finalized salaries.";
++        "Failed to load salary records.";
+ 
+       setError(message);
+ 
+@@ -147,8 +149,8 @@ const Salary = () => {
+   };
+ 
+   useEffect(() => {
+-    loadFinalizedSalaries();
+-  }, [monthValue]);
++    loadSalaryRecords();
++  }, [monthValue, selectedFirm?.code]);
+ 
+   // --------------------------------------------------
+   // Employee map
+@@ -259,7 +261,7 @@ const Salary = () => {
+     () =>
+       rows.filter(
+         (row) =>
+-          row.paymentStatus === "FINALIZED"
++          row.paymentStatus === "FINALIZED" || row.paymentStatus === "PAID"
+       ),
+     [rows]
+   );
+@@ -367,13 +369,13 @@ const Salary = () => {
+           </p>
+         </div>
+ 
+-        <div className="salary-firm-chip">
++        {/* <div className="salary-firm-chip">
+           <span className="material-symbols-outlined" aria-hidden="true">apartment</span>
+           <div>
+             <small>Current firm</small>
+             <strong>{selectedFirm ? `${selectedFirm.code} · ${selectedFirm.name || "Firm"}` : "No firm selected"}</strong>
+           </div>
+-        </div>
++        </div> */}
+       </div>
+ 
+       {/* Salary Toolbar */}
+diff --git a/frontend/src/pages/SupervisorDashboard.jsx b/frontend/src/pages/SupervisorDashboard.jsx
+index 7ac14f9..24b0726 100644
+--- a/frontend/src/pages/SupervisorDashboard.jsx
++++ b/frontend/src/pages/SupervisorDashboard.jsx
+@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
+ import api from "../api/axios";
+ import { useAuth } from "../context/AuthContext";
+ import { useFirm } from "../context/FirmContext";
++import { useNavigate } from "react-router-dom";
++import StatCard from "../components/StatCard";
+ 
+ const formatTime = (value) => {
+   if (!value) return "--";
+@@ -96,6 +98,7 @@ const getInitials = (name) => {
+ };
+ 
+ const SupervisorDashboard = () => {
++  const navigate = useNavigate();
+   const { user } = useAuth();
+   const { selectedFirm } = useFirm();
+ 
+@@ -616,42 +619,31 @@ const SupervisorDashboard = () => {
+           PAGE HEADER
+       ===================================================== */}
+ 
+-      {/* <div className="page-header supervisor-page-header">
++      <div className="page-header">
+         <div>
+-          <div className="supervisor-firm-label">
+-            <span className="material-symbols-outlined">
+-              business
+-            </span>
+-
+-            {selectedFirm?.name ||
+-              selectedFirm?.code ||
+-              "Firm"}
+-          </div>
+-
+           <h1>Supervisor Dashboard</h1>
+-
+-          <p>
+-            Track your team's daily attendance
+-            and manage quick check-ins.
+-          </p>
++          <p>Live overview of your team's attendance and daily check-ins.</p>
+         </div>
+-
+-        <div className="supervisor-header-meta">
+-          <div className="supervisor-header-firm">
+-            <span className="material-symbols-outlined">
+-              domain
+-            </span>
+-
+-            {selectedFirm?.code ||
+-              "Select a firm"}
+-          </div>
+-
+-          <span className="supervisor-live-indicator">
+-            <span className="supervisor-live-dot" />
+-            Live attendance
+-          </span>
++        <div className="page-header-actions">
++          <button className="primary-button" onClick={() => navigate("/employees/add")}>
++            <span className="material-symbols-outlined">person_add</span>
++            Add Employee
++          </button>
++          <button className="primary-button" onClick={() => navigate("/supervisor-attendance")}>
++            <span className="material-symbols-outlined">calendar_today</span>
++            View Attendance
++          </button>
+         </div>
+-      </div> */}
++      </div>
++
++      <div className="stats-grid">
++        {[
++          { title: "Present Today", value: stats.present, icon: "check_circle", trend: "Today", trendType: "neutral" },
++          { title: "Absent Today", value: stats.absent, icon: "cancel", trend: "Today", trendType: "neutral" },
++          { title: "Late Today", value: stats.late, icon: "schedule", trend: "Today", trendType: "neutral" },
++          { title: "Not Marked Today", value: stats.pending, icon: "pending_actions", trend: "Today", trendType: "pending" },
++        ].map(stat => <StatCard key={stat.title} {...stat} to="/supervisor-attendance" />)}
++      </div>
+ 
+       {/* =====================================================
+           FILTER / SCOPE CARD
+@@ -675,7 +667,7 @@ const SupervisorDashboard = () => {
+           {/* Department */}
+ 
+           <div className="scope-select-card">
+-            <label>
++            <label htmlFor="supervisor-department">
+               Department
+             </label>
+ 
+@@ -685,6 +677,7 @@ const SupervisorDashboard = () => {
+               </span>
+ 
+               <select
++                id="supervisor-department"
+                 value={department}
+                 onChange={
+                   handleDepartmentChange
+@@ -713,7 +706,7 @@ const SupervisorDashboard = () => {
+           {/* Team */}
+ 
+           <div className="scope-select-card">
+-            <label>
++            <label htmlFor="supervisor-team">
+               Team
+             </label>
+ 
+@@ -723,6 +716,7 @@ const SupervisorDashboard = () => {
+               </span>
+ 
+               <select
++                id="supervisor-team"
+                 value={team}
+                 onChange={(event) =>
+                   setTeam(
+@@ -745,7 +739,7 @@ const SupervisorDashboard = () => {
+           {/* Shift */}
+ 
+           <div className="scope-select-card">
+-            <label>
++            <label htmlFor="supervisor-shift">
+               Shift
+             </label>
+ 
+@@ -755,6 +749,7 @@ const SupervisorDashboard = () => {
+               </span>
+ 
+               <select
++                id="supervisor-shift"
+                 value={shift}
+                 onChange={(event) =>
+                   setShift(
+@@ -864,73 +859,6 @@ const SupervisorDashboard = () => {
+         </div>
+       </div>
+ 
+-      {/* =====================================================
+-          STATISTICS
+-      ===================================================== */}
+-
+-      <div className="stats-grid supervisor-stats-grid">
+-
+-        {/* Present */}
+-
+-        <div className="stat-card supervisor-stat-card">
+-          <div className="supervisor-stat-icon supervisor-stat-present">
+-            <span className="material-symbols-outlined">
+-              person_check
+-            </span>
+-          </div>
+-
+-          <div>
+-            <h2>{stats.present}</h2>
+-            <p>Present</p>
+-          </div>
+-        </div>
+-
+-        {/* Absent */}
+-
+-        <div className="stat-card supervisor-stat-card">
+-          <div className="supervisor-stat-icon supervisor-stat-absent">
+-            <span className="material-symbols-outlined">
+-              person_off
+-            </span>
+-          </div>
+-
+-          <div>
+-            <h2>{stats.absent}</h2>
+-            <p>Absent</p>
+-          </div>
+-        </div>
+-
+-        {/* Late */}
+-
+-        <div className="stat-card supervisor-stat-card">
+-          <div className="supervisor-stat-icon supervisor-stat-late">
+-            <span className="material-symbols-outlined">
+-              schedule
+-            </span>
+-          </div>
+-
+-          <div>
+-            <h2>{stats.late}</h2>
+-            <p>Late</p>
+-          </div>
+-        </div>
+-
+-        {/* Pending */}
+-
+-        <div className="stat-card supervisor-stat-card">
+-          <div className="supervisor-stat-icon supervisor-stat-pending">
+-            <span className="material-symbols-outlined">
+-              pending_actions
+-            </span>
+-          </div>
+-
+-          <div>
+-            <h2>{stats.pending}</h2>
+-            <p>Pending</p>
+-          </div>
+-        </div>
+-      </div>
+-
+       {/* =====================================================
+           EMPLOYEE TABLE
+       ===================================================== */}
+@@ -952,7 +880,7 @@ const SupervisorDashboard = () => {
+ 
+           <button
+             type="button"
+-            className="supervisor-refresh-btn"
++            className="btn btn-secondary supervisor-refresh-btn"
+             onClick={loadDashboard}
+             disabled={loading}
+             title="Refresh attendance"
+@@ -977,6 +905,7 @@ const SupervisorDashboard = () => {
+ 
+             <input
+               type="text"
++              aria-label="Search employees by name or code"
+               placeholder="Search employee..."
+               value={search}
+               onChange={(event) =>
+@@ -1154,7 +1083,7 @@ const SupervisorDashboard = () => {
+ 
+                             <button
+                               type="button"
+-                              className="btn-primary supervisor-action-btn"
++                              className="btn btn-primary supervisor-action-btn"
+                               disabled={
+                                 loading
+                               }
+@@ -1188,7 +1117,7 @@ const SupervisorDashboard = () => {
+ 
+                             <button
+                               type="button"
+-                              className="btn-primary supervisor-action-btn"
++                              className="btn btn-primary supervisor-action-btn"
+                               disabled={
+                                 loading
+                               }
+@@ -1257,4 +1186,3 @@ const SupervisorDashboard = () => {
+ };
+ 
+ export default SupervisorDashboard;
+-

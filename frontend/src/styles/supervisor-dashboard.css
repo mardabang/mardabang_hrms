@@ -1,0 +1,154 @@
+/* Supervisor-specific controls use the same surfaces and typography as admin. */
+.supervisor-dashboard {
+  --supervisor-surface: var(--white);
+  --supervisor-muted-surface: var(--light-gray);
+  --supervisor-text: var(--text);
+  --supervisor-muted: var(--text-secondary);
+  --supervisor-border: var(--border);
+}
+.dark-mode .supervisor-dashboard {
+  --supervisor-surface: var(--dark-card);
+  --supervisor-muted-surface: var(--dark-surface);
+  --supervisor-text: var(--dark-text);
+  --supervisor-muted: var(--dark-text-secondary);
+  --supervisor-border: var(--dark-border);
+}
+.supervisor-dashboard .dashboard-card {
+  background: var(--supervisor-surface);
+  border: 1px solid var(--supervisor-border);
+  border-radius: 10px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, .035);
+}
+.supervisor-dashboard .supervisor-card-header,
+.supervisor-dashboard .supervisor-table-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--supervisor-border);
+}
+.supervisor-dashboard .supervisor-card-header h3,
+.supervisor-dashboard .supervisor-table-header h3 {
+  margin: 0;
+  color: var(--supervisor-text);
+  font-size: var(--font-section-title);
+  font-weight: 600;
+}
+.supervisor-dashboard .supervisor-card-header p,
+.supervisor-dashboard .supervisor-table-header p {
+  margin: 7px 0 0;
+  color: var(--supervisor-muted);
+  font-size: var(--font-body);
+  line-height: 1.5;
+}
+.supervisor-dashboard .scope-select-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  padding: 20px;
+}
+.supervisor-dashboard .scope-select-card { min-width: 0; }
+.supervisor-dashboard .scope-select-card label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: var(--font-body);
+  font-weight: 500;
+  color: var(--supervisor-muted);
+}
+.supervisor-dashboard .supervisor-select-wrapper,
+.supervisor-dashboard .supervisor-search { position: relative; display: flex; align-items: center; }
+.supervisor-dashboard .supervisor-select-wrapper > .material-symbols-outlined,
+.supervisor-dashboard .supervisor-search > .material-symbols-outlined {
+  position: absolute;
+  left: 12px;
+  color: var(--supervisor-muted);
+  font-size: 20px;
+  pointer-events: none;
+}
+.supervisor-dashboard .supervisor-select-wrapper select,
+.supervisor-dashboard .supervisor-search input {
+  width: 100%;
+  min-width: 0;
+  height: 42px;
+  padding: 0 38px;
+  border: 1px solid var(--supervisor-border);
+  border-radius: 8px;
+  background: var(--supervisor-surface);
+  color: var(--supervisor-text);
+  font: inherit;
+  font-size: var(--font-body);
+}
+.supervisor-dashboard .supervisor-select-wrapper select { cursor: pointer; }
+.dark-mode .supervisor-dashboard select { color-scheme: dark; }
+.supervisor-dashboard :focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.supervisor-dashboard .shift-info-bar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0 20px 20px;
+  padding: 0;
+  gap: 0;
+  border: 1px solid var(--supervisor-border);
+  border-radius: 8px;
+  background: var(--supervisor-muted-surface);
+}
+.supervisor-dashboard .shift-info-item { display: flex; align-items: center; gap: 12px; padding: 16px; border-right: 1px solid var(--supervisor-border); }
+.supervisor-dashboard .shift-info-item:last-child { border-right: 0; }
+.supervisor-dashboard .shift-info-icon { display: flex; color: var(--supervisor-muted); }
+.supervisor-dashboard .shift-info-icon .material-symbols-outlined { font-size: 22px; }
+.supervisor-dashboard .shift-info-item small { display: block; margin-bottom: 6px; font-size: var(--font-label); color: var(--supervisor-muted); }
+.supervisor-dashboard .shift-info-item strong { display: block; font-size: var(--font-body); font-weight: 600; color: var(--supervisor-text); }
+.supervisor-dashboard .supervisor-filter-row { border: 0; border-bottom: 1px solid var(--supervisor-border); border-radius: 0; margin: 0; box-shadow: none; background: var(--supervisor-surface); }
+.supervisor-dashboard .supervisor-search { width: 100%; max-width: 440px; }
+.supervisor-dashboard .supervisor-search-clear { position: absolute; right: 10px; width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--supervisor-muted); cursor: pointer; }
+.supervisor-dashboard .supervisor-search-clear:hover { background: var(--supervisor-muted-surface); }
+.supervisor-dashboard .supervisor-search-clear .material-symbols-outlined { font-size: 18px; }
+.supervisor-dashboard .supervisor-error { display: flex; align-items: center; gap: 8px; margin: 16px 20px; }
+.supervisor-dashboard .supervisor-table-wrapper { width: 100%; overflow-x: auto; }
+.supervisor-dashboard .supervisor-employee-table { width: 100%; min-width: 900px; border-collapse: collapse; }
+.supervisor-dashboard .supervisor-employee-table thead th { padding: 14px 20px; background: var(--supervisor-muted-surface); color: var(--supervisor-muted); border-bottom: 1px solid var(--supervisor-border); font-size: var(--font-label); font-weight: 600; text-align: left; white-space: nowrap; }
+.supervisor-dashboard .supervisor-employee-table tbody td { padding: 16px 20px; color: var(--supervisor-text); border-bottom: 1px solid var(--supervisor-border); font-size: var(--font-body); vertical-align: middle; }
+.supervisor-dashboard .supervisor-employee-table tbody tr:last-child td { border-bottom: 0; }
+.supervisor-dashboard .supervisor-employee-table tbody tr:hover { background: var(--supervisor-muted-surface); }
+.supervisor-dashboard .supervisor-employee { display: flex; align-items: center; gap: 12px; min-width: 180px; }
+.supervisor-dashboard .supervisor-avatar { display: grid; place-items: center; width: 40px; height: 40px; flex: 0 0 40px; border-radius: 50%; background: var(--supervisor-muted-surface); color: var(--supervisor-muted); font-size: 13px; font-weight: 600; }
+.supervisor-dashboard .supervisor-employee-info { display: flex; flex-direction: column; gap: 4px; }
+.supervisor-dashboard .supervisor-employee-info strong { color: var(--supervisor-text); font-size: var(--font-body); font-weight: 600; }
+.supervisor-dashboard .supervisor-employee-info span,
+.supervisor-dashboard .supervisor-employee-info small { color: var(--supervisor-muted); font-size: var(--font-label); }
+.supervisor-dashboard .supervisor-time { color: var(--supervisor-text); font-size: var(--font-body); white-space: nowrap; }
+.supervisor-dashboard .supervisor-time-muted,
+.supervisor-dashboard .supervisor-ot { color: var(--supervisor-muted); }
+.supervisor-dashboard .supervisor-ot { white-space: nowrap; }
+.supervisor-dashboard .supervisor-status { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 20px; font-size: var(--font-caption); font-weight: 600; white-space: nowrap; }
+.supervisor-dashboard .supervisor-status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.supervisor-dashboard .supervisor-status-working,
+.supervisor-dashboard .supervisor-status-completed { background: #e8f5e9; color: var(--green); }
+.supervisor-dashboard .supervisor-status-late { background: #fff3e0; color: #995000; }
+.supervisor-dashboard .supervisor-status-pending { background: var(--supervisor-muted-surface); color: var(--supervisor-muted); }
+.supervisor-dashboard .supervisor-action { display: flex; align-items: center; }
+.supervisor-dashboard .supervisor-action-btn { min-width: 112px; white-space: nowrap; }
+.supervisor-dashboard button:disabled { opacity: .55; cursor: not-allowed; }
+.supervisor-dashboard .supervisor-completed-action { display: inline-flex; align-items: center; gap: 6px; color: var(--green); font-size: var(--font-label); }
+.supervisor-dashboard .supervisor-completed-action .material-symbols-outlined { font-size: 18px; }
+.dark-mode .supervisor-dashboard .supervisor-status-working,
+.dark-mode .supervisor-dashboard .supervisor-status-completed { background: #193825; color: #81c784; }
+.dark-mode .supervisor-dashboard .supervisor-status-late { background: #3b2c17; color: #ffcc80; }
+.dark-mode .supervisor-dashboard .supervisor-completed-action { color: #81c784; }
+.supervisor-dashboard .supervisor-employee-table .supervisor-empty { padding: 48px 20px; text-align: center; }
+.supervisor-dashboard .supervisor-empty-state { display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--supervisor-muted); }
+.supervisor-dashboard .supervisor-empty-state > .material-symbols-outlined { font-size: 36px; }
+.supervisor-dashboard .supervisor-empty-state strong { color: var(--supervisor-text); font-weight: 600; }
+@media (max-width: 1100px) {
+  .supervisor-dashboard .scope-select-grid { gap: 12px; }
+  .supervisor-dashboard .shift-info-item { padding: 14px 10px; gap: 8px; }
+}
+@media (max-width: 640px) {
+  .supervisor-dashboard .page-header { align-items: flex-start; flex-direction: column; gap: 16px; }
+  .supervisor-dashboard .scope-select-grid,
+  .supervisor-dashboard .shift-info-bar { grid-template-columns: 1fr; }
+  .supervisor-dashboard .shift-info-item { padding: 14px 16px; border-right: 0; border-bottom: 1px solid var(--supervisor-border); }
+  .supervisor-dashboard .shift-info-item:last-child { border-bottom: 0; }
+  .supervisor-dashboard .supervisor-table-header { align-items: flex-start; flex-wrap: wrap; }
+  .supervisor-dashboard .supervisor-search { max-width: none; }
+}

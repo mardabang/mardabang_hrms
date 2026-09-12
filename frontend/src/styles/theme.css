@@ -1,0 +1,90 @@
+/* Shared admin dashboard palette and type scale for every portal. */
+:root {
+  --font-family: "Inter", sans-serif;
+  --font-page-title: 30px;
+  --font-section-title: 16px;
+  --font-body: 13px;
+  --font-label: 12px;
+  --font-caption: 11px;
+  --font-stat: 32px;
+  --surface: #ffffff;
+  --surface-muted: #f5f5f5;
+  --surface-hover: #eeeeee;
+  --text-primary: var(--text);
+  --card-bg: var(--surface);
+  --page-bg: var(--background);
+  --border-color: var(--border);
+  --on-primary: #ffffff;
+  --accent-soft: rgba(211, 47, 47, .08);
+}
+html.dark-mode, .app-layout.dark-mode {
+  --background: #121212;
+  --surface: #202020;
+  --surface-muted: #181818;
+  --surface-hover: #292929;
+  --white: var(--surface);
+  --light-gray: var(--surface-muted);
+  --gray: var(--surface-hover);
+  --text: #f1f1f1;
+  --text-secondary: #b8b8b8;
+  --border: #383838;
+  --border-red: #653333;
+  --accent-soft: rgba(255, 107, 107, .12);
+}
+body { font-family: var(--font-family); font-size: var(--font-body); color: var(--text); background: var(--background); }
+button, input, select, textarea { font-family: var(--font-family); }
+#root .page-header h1 { font-size: var(--font-page-title); font-weight: 700; line-height: 1.2; letter-spacing: -.5px; color: var(--text); }
+#root .page-header p { font-size: var(--font-body); color: var(--text-secondary); line-height: 1.6; }
+#root :is(.card-header, .settings-section-header, .section-header, .modal-header, .ledger-section-heading) :is(h2, h3),
+#root :is(.settings-card-link, .backup-card) h3 { font-size: var(--font-section-title); font-weight: 600; color: var(--text); }
+#root :is(.stat-content h2, .summary-card h3, .ledger-summary-card > strong) { font-size: var(--font-stat); }
+#root :is(.stat-content p, .summary-card p, .form-group label, .settings-field label, .employee-filter, .employee-filter-select) { font-size: var(--font-body); }
+#root .stat-content p { font-size: var(--font-caption); }
+#root :is(.btn, .primary-button, .auth-button) { font-size: var(--font-label); }
+#root :is(.employee-table, .payment-table, .salary-table, .report-table, .ledger-table, .ep-table, .leave-table) td { font-size: var(--font-body); }
+#root :is(.employee-table, .payment-table, .salary-table, .report-table, .ledger-table, .ep-table, .leave-table) th { font-size: var(--font-label); }
+#root :is(.form-group, .settings-field, .employee-filter, .backup-card, .auth-form) :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+  font-size: var(--font-body);
+}
+input::placeholder, textarea::placeholder { color: var(--text-secondary); opacity: .75; }
+.sidebar-nav { min-height: 0; overflow-y: auto; }
+.logo-container, .sidebar-footer { flex-shrink: 0; }
+.logo-box, .auth-card-logo, .auth-logo { background: #ffffff; }
+#root .register-card { max-width: 760px; padding: 28px; }
+.register-brand { display: flex; align-items: center; gap: 24px; padding-bottom: 24px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
+.register-brand img { width: 150px; height: 95px; object-fit: contain; padding: 12px; border-radius: 8px; background: #ffffff; }
+.register-brand h2 { margin: 0 0 8px; font-size: var(--font-section-title); }
+.register-brand p { margin: 0; color: var(--text-secondary); font-size: var(--font-body); }
+.register-card .auth-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.register-card .auth-form > :is(.auth-error, .auth-button, .auth-footer) { grid-column: 1 / -1; }
+.register-card .form-group { min-width: 0; margin: 0; }
+.register-card .form-group small { color: var(--text-secondary); font-size: var(--font-caption); line-height: 1.6; }
+.register-card .auth-footer { margin-top: 0; }
+.dark-mode #root :is(.dashboard-card, .employee-card, .payment-card, .salary-card, .report-card, .settings-card, .backup-card, .modal-content, .auth-card, .attendance-action-panel) {
+  background: var(--surface); color: var(--text); border-color: var(--border);
+}
+.dark-mode #root :is(.employee-filter, .profile-static-field, .profile-firm-chip, .ledger-employee-bar, .ledger-summary-card, .profile-summary-grid, .auth-right) {
+  background: var(--surface-muted); color: var(--text); border-color: var(--border);
+}
+.dark-mode #root :is(.profile-section-title, .profile-empty-note, .profile-firm-chip small, .backup-note, .backup-help, .auth-footer, .auth-card > p, .password-toggle, .supervisor-shift-time) { color: var(--text-secondary); }
+.dark-mode #root :is(.profile-divider, .profile-actions, .modal-header, .modal-footer, .employee-table td, .payment-table td, .ledger-table td) { border-color: var(--border); }
+.dark-mode #root :is(.profile-firm-chip strong, .profile-static-field, .ledger-description strong) { color: var(--text); }
+.dark-mode #root :is(.employee-table, .payment-table, .salary-table, .report-table, .ledger-table) th { background: var(--surface-muted); color: var(--text-secondary); border-color: var(--border); }
+.dark-mode #root :is(.employee-table, .payment-table, .salary-table, .report-table, .ledger-table) td { color: var(--text); border-color: var(--border); }
+.dark-mode #root :is(.ledger-summary-total, .ledger-empty-icon, .ledger-summary-icon) { background: var(--accent-soft); }
+.dark-mode #root :is(.settings-success, .attendance-success) { background: #193825; color: #81c784; border-color: #2e573a; }
+.dark-mode #root :is(.auth-error, .attendance-validation-error) { color: #ff9b9b; background: #3a2020; border-color: #653333; }
+.dark-mode #root .auth-page { background: var(--background); }
+.dark-mode #root .auth-card h2 { color: var(--text); }
+.supervisor-shift-time { color: var(--text-secondary); font-size: var(--font-body); }
+.employee-firm-label { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: var(--font-body); }
+.employee-portal button:disabled { opacity: .55; cursor: not-allowed; }
+@media (max-width: 640px) {
+  :root { --font-page-title: 24px; --font-stat: 24px; }
+  #root .register-card { padding: 20px; }
+  .register-card .auth-form { grid-template-columns: 1fr; }
+  .register-brand { gap: 16px; flex-wrap: wrap; }
+}

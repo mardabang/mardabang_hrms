@@ -1,0 +1,107 @@
+/* Spacing refinements only; the attendance form and its values stay intact. */
+.attendance-details-modal.attendance-entry-modal {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+  max-height: calc(100dvh - 40px);
+  scrollbar-gutter: stable;
+}
+.attendance-entry-modal .attendance-modal-header {
+  padding: 20px 24px;
+  align-items: center;
+  border-color: var(--border);
+}
+.attendance-entry-modal .attendance-modal-header h2 { font-size: 20px; font-weight: 600; line-height: 1.3; }
+.attendance-entry-modal .attendance-modal-header p { line-height: 1.6; overflow-wrap: anywhere; }
+.attendance-entry-modal .attendance-modal-close { flex-shrink: 0; width: 36px; height: 36px; }
+.attendance-entry-modal .attendance-detail-date {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 24px 0;
+  font-size: var(--font-body);
+}
+.attendance-entry-modal .attendance-detail-date .material-symbols-outlined { font-size: 18px; }
+.attendance-entry-modal .attendance-location-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 16px 24px 0;
+  padding: 14px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.attendance-entry-modal .attendance-location-header { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.attendance-entry-modal .attendance-location-header > .material-symbols-outlined,
+.attendance-entry-modal .attendance-location-empty > .material-symbols-outlined { font-size: 22px; color: var(--text-secondary); flex-shrink: 0; }
+.attendance-entry-modal .attendance-location-section strong { display: block; color: var(--text); font-size: var(--font-body); font-weight: 600; }
+.attendance-entry-modal .attendance-location-section p { margin: 6px 0 0; color: var(--text-secondary); font-size: var(--font-label); line-height: 1.5; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.attendance-entry-modal .attendance-location-section .attendance-location-button {
+  flex-shrink: 0;
+  height: 34px;
+  padding: 0 10px;
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--primary);
+  font-size: var(--font-label);
+  white-space: nowrap;
+  text-decoration: none;
+  gap: 6px;
+}
+.attendance-entry-modal .attendance-location-section .attendance-location-button:hover { border-color: var(--primary); background: var(--accent-soft); }
+.attendance-entry-modal .attendance-location-button .material-symbols-outlined { font-size: 17px; }
+.attendance-entry-modal .attendance-location-empty { justify-content: flex-start; }
+.attendance-entry-modal .attendance-entry-section { padding: 18px 24px 0; }
+.attendance-entry-modal .attendance-entry-fields { padding: 16px 24px 0; gap: 16px; align-items: end; }
+.attendance-entry-modal .attendance-entry-section label,
+.attendance-entry-modal .attendance-entry-fields label { min-width: 0; gap: 8px; font-size: var(--font-label); line-height: 1.4; color: var(--text-secondary); }
+.attendance-entry-modal .attendance-entry-section select,
+.attendance-entry-modal .attendance-entry-fields select,
+.attendance-entry-modal .attendance-entry-fields input {
+  min-width: 0;
+  height: 40px;
+  padding: 0 11px;
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--font-body);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.attendance-entry-modal .attendance-entry-shift {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 60px;
+  padding: 10px 12px;
+  color: var(--text-secondary);
+  background: var(--surface-muted);
+  font-size: var(--font-label);
+}
+.attendance-entry-modal .attendance-entry-shift strong { font-size: var(--font-label); font-weight: 500; color: var(--text); font-variant-numeric: tabular-nums; }
+.attendance-entry-modal .attendance-entry-recorded-times { gap: 8px; }
+.attendance-entry-modal .attendance-entry-recorded-times > div { width: 100%; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.attendance-entry-modal .attendance-entry-actions { margin-top: 20px; padding: 16px 24px; border-top: 1px solid var(--border); gap: 10px; }
+.attendance-entry-modal .attendance-entry-actions .btn { height: 40px; min-width: 90px; justify-content: center; }
+.attendance-entry-modal .attendance-entry-actions .btn-secondary { background: var(--surface); color: var(--text-secondary); border-color: var(--border); }
+.attendance-entry-modal .attendance-entry-actions .btn-secondary:hover { background: var(--surface-muted); color: var(--text); }
+.attendance-entry-modal .attendance-validation-error { margin: 16px 24px 0; line-height: 1.6; }
+.attendance-entry-modal :is(button, a, input, select):focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+@media (max-width: 600px) {
+  .attendance-entry-modal .attendance-location-section { align-items: flex-start; flex-direction: column; }
+  .attendance-entry-modal .attendance-entry-fields { grid-template-columns: 1fr; }
+  .attendance-entry-modal .attendance-entry-shift { min-height: 54px; }
+}
+@media (max-width: 420px) {
+  .attendance-entry-modal .attendance-modal-header { padding: 18px; }
+  .attendance-entry-modal .attendance-detail-date { padding: 16px 18px 0; }
+  .attendance-entry-modal .attendance-location-section { margin: 14px 18px 0; }
+  .attendance-entry-modal .attendance-entry-section, .attendance-entry-modal .attendance-entry-fields { padding: 16px 18px 0; }
+  .attendance-entry-modal .attendance-entry-actions { padding: 16px 18px; }
+  .attendance-entry-modal .attendance-entry-actions .btn { flex: 1; padding: 0 12px; }
+}

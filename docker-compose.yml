@@ -1,0 +1,61 @@
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: marda-hrms-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-marda_hrms}
+      MYSQL_USER: ${DB_USER:-marda_hrms}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./marda-hrms-backend
+      dockerfile: Dockerfile
+    container_name: marda-hrms-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${DB_NAME:-marda_hrms}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Kolkata
+      SPRING_DATASOURCE_USERNAME: ${DB_USER:-marda_hrms}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      APP_JWT_SECRET: ${JWT_SECRET}
+      APP_SMS_PROVIDER: ${SMS_PROVIDER:-console}
+      APP_SMS_MSG91_AUTHKEY: ${MSG91_AUTHKEY:-}
+      APP_SMS_MSG91_TEMPLATE_ID: ${MSG91_TEMPLATE_ID:-}
+      APP_SMS_MSG91_SENDER_ID: ${MSG91_SENDER_ID:-}
+      SPRING_MAIL_HOST: ${MAIL_HOST:-smtp.gmail.com}
+      SPRING_MAIL_PORT: ${MAIL_PORT:-587}
+      SPRING_MAIL_USERNAME: ${MAIL_USERNAME:-}
+      SPRING_MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      APP_MAIL_FROM: ${MAIL_USERNAME:-}
+      APP_RESET_PASSWORD_BASE_URL: ${RESET_PASSWORD_BASE_URL:-http://localhost/reset-password}
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build:
+      context: ./marda-hrms-frontend
+      dockerfile: Dockerfile
+    container_name: marda-hrms-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+volumes:
+  mysql_data:
