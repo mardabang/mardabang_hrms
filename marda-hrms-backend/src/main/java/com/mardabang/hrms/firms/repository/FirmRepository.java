@@ -10,4 +10,6 @@ public interface FirmRepository extends JpaRepository<Firm, Long> {
     Optional<Firm> findByCode(String code);
 
     boolean existsByCode(String code);
+    
+    
 }

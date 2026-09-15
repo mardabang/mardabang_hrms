@@ -2,7 +2,6 @@ package com.mardabang.hrms.auth.controller;
 
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -15,17 +14,14 @@ import org.springframework.web.bind.annotation.RestController;
 import com.mardabang.hrms.auth.dto.ForgotPasswordRequest;
 import com.mardabang.hrms.auth.dto.LoginRequest;
 import com.mardabang.hrms.auth.dto.LoginResponse;
-import com.mardabang.hrms.auth.dto.OtpRequest;
-import com.mardabang.hrms.auth.dto.OtpVerifyRequest;
 import com.mardabang.hrms.auth.dto.RegisterRequest;
 import com.mardabang.hrms.auth.dto.ResetPasswordRequest;
 import com.mardabang.hrms.auth.security.JwtUtil;
-import com.mardabang.hrms.auth.service.OtpService;
 import com.mardabang.hrms.auth.service.PasswordResetService;
-import com.mardabang.hrms.employee.service.EmployeeService;
 import com.mardabang.hrms.employee.dto.EmployeeDto;
-import com.mardabang.hrms.firms.repository.FirmRepository;
+import com.mardabang.hrms.employee.service.EmployeeService;
 import com.mardabang.hrms.firms.entity.Firm;
+import com.mardabang.hrms.firms.repository.FirmRepository;
 import com.mardabang.hrms.user.entity.Role;
 import com.mardabang.hrms.user.entity.User;
 import com.mardabang.hrms.user.service.UserService;
@@ -40,174 +36,360 @@ public class AuthController {
     private final JwtUtil jwtUtil;
     private final PasswordEncoder passwordEncoder;
     private final EmployeeService employeeService;
-    private final OtpService otpService;
     private final PasswordResetService passwordResetService;
     private final FirmRepository firmRepository;
 
-    public AuthController(UserService userService,
-                          JwtUtil jwtUtil,
-                          PasswordEncoder passwordEncoder,
-                          EmployeeService employeeService,
-                          OtpService otpService,
-                          PasswordResetService passwordResetService,
-                          FirmRepository firmRepository) {
+    public AuthController(
+            UserService userService,
+            JwtUtil jwtUtil,
+            PasswordEncoder passwordEncoder,
+            EmployeeService employeeService,
+            PasswordResetService passwordResetService,
+            FirmRepository firmRepository) {
+
         this.userService = userService;
         this.jwtUtil = jwtUtil;
         this.passwordEncoder = passwordEncoder;
         this.employeeService = employeeService;
-        this.otpService = otpService;
         this.passwordResetService = passwordResetService;
         this.firmRepository = firmRepository;
     }
 
-    @PostMapping("/register")
-    public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest request) {
+    // ============================================================
+    // REGISTER
+    // ============================================================
 
-        if (userService.emailExists(request.getEmail())) {
+    @PostMapping("/register")
+    public ResponseEntity<?> register(
+            @Valid @RequestBody RegisterRequest request) {
+
+        String email = request.getEmail() == null
+                ? null
+                : request.getEmail().trim();
+
+        String mobile = request.getMobile() == null
+                ? null
+                : request.getMobile().trim();
+
+        String loginId = request.getLoginId() == null
+                ? null
+                : request.getLoginId().trim();
+
+        String employeeCode = request.getEmployeeCode() == null
+                ? null
+                : request.getEmployeeCode().trim();
+
+        Role role = request.getRole();
+        if (role == null || email == null || email.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Role and registered email are required."));
+        }
+        loginId = role == Role.ADMIN ? email : mobile;
+        if (role != Role.ADMIN && (mobile == null || !mobile.matches("[6-9]\\d{9}"))) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Enter a valid registered 10-digit phone number."));
+        }
+
+        // ------------------------------------------------------------
+        // Basic duplicate checks
+        // ------------------------------------------------------------
+
+        if (email != null && userService.emailExists(email)) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                     .body("Email already exists.");
         }
-        if (request.getMobile() != null && !request.getMobile().isBlank()
-                && userService.mobileExists(request.getMobile())) {
+
+        if (mobile != null
+                && !mobile.isBlank()
+                && userService.mobileExists(mobile)) {
+
             return ResponseEntity.status(HttpStatus.CONFLICT)
                     .body("Mobile number already exists.");
         }
 
-        Role role = request.getRole();
+        // ------------------------------------------------------------
+        // Login ID is required for every account
+        // ------------------------------------------------------------
 
-        // Supervisor and Employee accounts log in via mobile + OTP only, so a
-        // mobile number is mandatory for them (it was previously optional for everyone).
-        if (role != Role.ADMIN && (request.getMobile() == null || request.getMobile().isBlank())) {
-            return ResponseEntity.badRequest().body("Mobile number is required for Supervisor and Employee accounts.");
+        if (loginId == null || loginId.isBlank()) {
+
+            return ResponseEntity.badRequest()
+                    .body("User ID is required.");
         }
 
-        // Only Admin accounts use a password; enforce that manually since the
-        // DTO no longer requires @NotBlank on password (Supervisor/Employee
-        // accounts never supply one).
-        if (role == Role.ADMIN && (request.getPassword() == null || request.getPassword().isBlank())) {
-            return ResponseEntity.badRequest().body("Password is required for Admin accounts.");
+        if (userService.loginIdExists(loginId)) {
+
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body("User ID already exists.");
         }
 
-        // Both Supervisor and Employee accounts must link to a real employee
-        // record — this previously only applied to INPUTER (Supervisor),
-        // which meant Employee accounts had no employeeCode linkage at all.
-        String employeeCode = request.getEmployeeCode() == null
-                ? null : request.getEmployeeCode().trim();
+        // ------------------------------------------------------------
+        // Password is required for every account
+        // ------------------------------------------------------------
+
+        if (request.getPassword() == null
+                || request.getPassword().isBlank()) {
+
+            return ResponseEntity.badRequest()
+                    .body("Password is required.");
+        }
+
+        // ------------------------------------------------------------
+        // Supervisor / Employee must have mobile
+        // ------------------------------------------------------------
+
+        if (role != Role.ADMIN
+                && (mobile == null || mobile.isBlank())) {
+
+            return ResponseEntity.badRequest()
+                    .body(
+                        "Mobile number is required for Supervisor and Employee accounts."
+                    );
+        }
+
+        // ------------------------------------------------------------
+        // Supervisor / Employee must be linked to an employee
+        // ------------------------------------------------------------
+
+        String finalEmployeeCode = employeeCode;
+
         Firm assignedFirm = null;
-        if (role == Role.INPUTER || role == Role.EMPLOYEE) {
-            if (employeeCode == null || employeeCode.isBlank()) {
-                return ResponseEntity.badRequest().body("Employee code is required for a Supervisor or Employee account.");
+
+        if (role == Role.INPUTER) {
+
+            // Supervisor must have a firm
+            String firmCode = request.getFirmCode() == null
+                    ? null
+                    : request.getFirmCode().trim();
+
+            if (firmCode == null || firmCode.isBlank()) {
+                return ResponseEntity.badRequest()
+                        .body("Firm is required for a Supervisor account.");
             }
-            EmployeeDto employee = employeeService.getEmployeeByCode(employeeCode);
+
+            // Find the selected firm
+            assignedFirm = firmRepository.findByCode(firmCode)
+                    .orElse(null);
+
+            if (assignedFirm == null) {
+                return ResponseEntity.badRequest()
+                        .body("Selected firm does not exist.");
+            }
+
+            // Only active firms can be assigned
+            if (!Boolean.TRUE.equals(assignedFirm.getActive())) {
+                return ResponseEntity.badRequest()
+                        .body("Selected firm is inactive.");
+            }
+
+            // Supervisor is NOT an employee
+            finalEmployeeCode = null;
+
+        } else if (role == Role.EMPLOYEE) {
+
+            // Employee must be linked to an employee code
+            if (finalEmployeeCode == null
+                    || finalEmployeeCode.isBlank()) {
+
+                return ResponseEntity.badRequest()
+                        .body("Employee code is required for an Employee account.");
+            }
+
+            EmployeeDto employee =
+                    employeeService.getEmployeeByCode(finalEmployeeCode);
+
             if (employee == null) {
-                return ResponseEntity.badRequest().body("Employee code does not exist.");
+                return ResponseEntity.badRequest()
+                        .body("Employee code does not exist.");
             }
-            if (Boolean.FALSE.equals(employee.getActive()) || "Inactive".equalsIgnoreCase(employee.getStatus())) {
-                return ResponseEntity.badRequest().body("The linked employee must be active.");
+
+            if (Boolean.FALSE.equals(employee.getActive())
+                    || "Inactive".equalsIgnoreCase(employee.getStatus())) {
+
+                return ResponseEntity.badRequest()
+                        .body("The linked employee must be active.");
             }
-            assignedFirm = employee.getFirmId() == null ? null : firmRepository.findById(employee.getFirmId()).orElse(null);
-            if (assignedFirm == null || !Boolean.TRUE.equals(assignedFirm.getActive())) {
-                return ResponseEntity.badRequest().body("The linked employee must belong to an active firm.");
+
+            // Get the employee's firm
+            if (employee.getFirmId() != null) {
+                assignedFirm = firmRepository.findById(employee.getFirmId())
+                        .orElse(null);
             }
-            if (userService.employeeCodeExists(employeeCode)) {
+
+            if (assignedFirm == null
+                    || !Boolean.TRUE.equals(assignedFirm.getActive())) {
+
+                return ResponseEntity.badRequest()
+                        .body("The linked employee must belong to an active firm.");
+            }
+
+            // Employee code can only belong to one account
+            if (userService.employeeCodeExists(finalEmployeeCode)) {
+
                 return ResponseEntity.status(HttpStatus.CONFLICT)
                         .body("An account is already linked to this employee code.");
             }
+
         } else {
-            employeeCode = null;
+
+            // Admin does not have an employee code or firm requirement here
+            finalEmployeeCode = null;
         }
 
-        // Supervisor/Employee accounts never log in with a password, so a
-        // random unguessable value fills the (presumably NOT NULL) column;
-        // it is never surfaced and cannot be used to log in via /login.
-        String rawPassword = (role == Role.ADMIN) ? request.getPassword() : UUID.randomUUID().toString();
+        // ------------------------------------------------------------
+        // Create user
+        // ------------------------------------------------------------
 
         User user = User.builder()
                 .fullName(request.getFullName().trim())
-                .email(request.getEmail().trim())
-                .mobile(request.getMobile())
-                .employeeCode(employeeCode)
-                .password(rawPassword)
+                .email(email)
+                .mobile(mobile)
+                .loginId(loginId)
+                .employeeCode(finalEmployeeCode)
+                .password(request.getPassword())
                 .role(role)
                 .active(true)
                 .build();
 
-        if (assignedFirm != null) user.getFirms().add(assignedFirm);
+        if (assignedFirm != null) {
+            user.getFirms().add(assignedFirm);
+        }
+
         userService.saveUser(user);
 
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body("User registered successfully.");
+        return ResponseEntity
+                .status(HttpStatus.CREATED)
+                .body(
+                    Map.of(
+                        "message",
+                        "User registered successfully.",
+                        "loginId",
+                        loginId
+                    )
+                );
     }
 
-    @PostMapping("/login")
-    public ResponseEntity<?> login(@Valid @RequestBody LoginRequest request) {
+    // ============================================================
+    // LOGIN
+    // ============================================================
 
-        User user = userService.getUserByEmail(request.getEmail())
-                .orElse(null);
+    @PostMapping("/login")
+    public ResponseEntity<?> login(
+            @Valid @RequestBody LoginRequest request) {
+
+        String loginId = request.getLoginId() == null
+                ? ""
+                : request.getLoginId().trim();
+
+        User user = loginId.contains("@")
+                ? userService.getUserByEmail(loginId).filter(u -> u.getRole() == Role.ADMIN).orElse(null)
+                : userService.getUserByMobile(loginId)
+                    .filter(u -> u.getRole() == Role.INPUTER || u.getRole() == Role.EMPLOYEE).orElse(null);
 
         if (user == null) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body("Invalid email or password.");
+
+            return ResponseEntity
+                    .status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("message", "Invalid email/phone number or password."));
         }
 
         if (!Boolean.TRUE.equals(user.getActive())) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body("Invalid email or password.");
+
+            return ResponseEntity
+                    .status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("message", "Invalid email/phone number or password."));
         }
 
-        // Password login is Admin-only now; Supervisor/Employee accounts hold
-        // a random, never-disclosed password value and must use /otp/request
-        // + /otp/verify instead.
-        if (user.getRole() != Role.ADMIN) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body("This account signs in with a mobile OTP, not a password.");
+        if (user.getPassword() == null
+                || user.getPassword().isBlank()) {
+
+            return ResponseEntity
+                    .status(HttpStatus.UNAUTHORIZED)
+                    .body("This account does not have a password.");
         }
 
-        if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body("Invalid email or password.");
+        if (!passwordEncoder.matches(
+                request.getPassword(),
+                user.getPassword())) {
+
+            return ResponseEntity
+                    .status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("message", "Invalid email/phone number or password."));
         }
 
-        return ResponseEntity.ok(buildLoginResponse(user));
+        return ResponseEntity.ok(
+                buildLoginResponse(user)
+        );
     }
 
-    @PostMapping("/otp/request")
-    public ResponseEntity<?> requestOtp(@Valid @RequestBody OtpRequest request) {
-        otpService.requestOtp(request.getMobile());
-        // Always the same response, whether or not the number is registered —
-        // avoids letting someone probe which numbers have accounts.
-        return ResponseEntity.ok(Map.of("message", "If this number is registered, a code has been sent."));
-    }
-
-    @PostMapping("/otp/verify")
-    public ResponseEntity<?> verifyOtp(@Valid @RequestBody OtpVerifyRequest request) {
-        User user = otpService.verifyOtp(request.getMobile(), request.getCode());
-        return ResponseEntity.ok(buildLoginResponse(user));
-    }
+    // ============================================================
+    // FORGOT PASSWORD
+    // ============================================================
 
     @PostMapping("/forgot-password")
-    public ResponseEntity<?> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
-        passwordResetService.forgotPassword(request.getEmail());
-        // Same response regardless of whether the email exists or is an Admin account.
-        return ResponseEntity.ok(Map.of("message", "If that email belongs to an Admin account, a reset link has been sent."));
+    public ResponseEntity<?> forgotPassword(
+            @Valid @RequestBody ForgotPasswordRequest request) {
+
+        passwordResetService.forgotPassword(
+                request.getEmail().trim()
+        );
+
+        /*
+         * Same response whether the email exists or not.
+         * This prevents account/email enumeration.
+         */
+        return ResponseEntity.ok(
+                Map.of(
+                    "message",
+                    "If that email is registered, a password reset link has been sent."
+                )
+        );
     }
+
+    // ============================================================
+    // RESET PASSWORD
+    // ============================================================
 
     @PostMapping("/reset-password")
-    public ResponseEntity<?> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
-        passwordResetService.resetPassword(request.getToken(), request.getNewPassword());
-        return ResponseEntity.ok(Map.of("message", "Password updated. You can now log in."));
+    public ResponseEntity<?> resetPassword(
+            @Valid @RequestBody ResetPasswordRequest request) {
+
+        passwordResetService.resetPassword(
+                request.getToken(),
+                request.getNewPassword()
+        );
+
+        return ResponseEntity.ok(
+                Map.of(
+                    "message",
+                    "Password updated. You can now log in."
+                )
+        );
     }
 
-    private LoginResponse buildLoginResponse(User user) {
-        String token = jwtUtil.generateToken(user.getEmail(), user.getRole().name());
+    // ============================================================
+    // LOGIN RESPONSE
+    // ============================================================
 
-        List<String> firmCodes = user.getFirms().stream()
-                .map(Firm::getCode)
-                .toList();
+    private LoginResponse buildLoginResponse(User user) {
+
+        /*
+         * JWT subject is now the User ID / loginId,
+         * not the email.
+         */
+        String token = jwtUtil.generateToken(
+                user.getLoginId() == null || user.getLoginId().isBlank() ? user.getEmail() : user.getLoginId(),
+                user.getRole().name()
+        );
+
+        List<String> firmCodes =
+                user.getFirms()
+                        .stream()
+                        .map(Firm::getCode)
+                        .toList();
 
         return new LoginResponse(
                 token,
                 user.getId(),
+                user.getRole() == Role.ADMIN ? user.getEmail() : user.getMobile(),
                 user.getEmail(),
                 user.getFullName(),
                 user.getRole().name(),

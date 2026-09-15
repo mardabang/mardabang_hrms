@@ -1,6 +1,5 @@
 package com.mardabang.hrms.auth.dto;
 
-import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Getter;
 import lombok.Setter;
@@ -9,10 +8,9 @@ import lombok.Setter;
 @Setter
 public class LoginRequest {
 
-    @Email
-    @NotBlank
-    private String email;
+    @NotBlank(message = "User ID is required")
+    private String loginId;
 
-    @NotBlank
+    @NotBlank(message = "Password is required")
     private String password;
 }

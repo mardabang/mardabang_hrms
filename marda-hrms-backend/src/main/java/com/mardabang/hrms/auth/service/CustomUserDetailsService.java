@@ -1,7 +1,6 @@
 package com.mardabang.hrms.auth.service;
 
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -19,14 +18,28 @@ public class CustomUserDetailsService implements UserDetailsService {
     }
 
     @Override
-    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        com.mardabang.hrms.user.entity.User user = userService.getUserByEmail(username)
-                .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
+    public UserDetails loadUserByUsername(String username)
+            throws UsernameNotFoundException {
 
-        return User.builder()
-                .username(user.getEmail())
+        var user = userService.getUserByLoginId(username)
+                .orElseGet(() ->
+                    userService.getUserByEmail(username)
+                        .orElseThrow(() ->
+                            new UsernameNotFoundException(
+                                "User not found: " + username
+                            )
+                        )
+                );
+
+        return org.springframework.security.core.userdetails.User
+                .builder()
+                .username(user.getLoginId() == null || user.getLoginId().isBlank() ? user.getEmail() : user.getLoginId())
                 .password(user.getPassword())
-                .authorities(new SimpleGrantedAuthority("ROLE_" + user.getRole().name()))
+                .authorities(
+                    new SimpleGrantedAuthority(
+                        "ROLE_" + user.getRole().name()
+                    )
+                )
                 .disabled(!Boolean.TRUE.equals(user.getActive()))
                 .build();
     }

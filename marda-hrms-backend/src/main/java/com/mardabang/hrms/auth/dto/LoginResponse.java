@@ -10,10 +10,18 @@ import lombok.Getter;
 public class LoginResponse {
 
     private String token;
+
     private Long userId;
+
+    private String loginId;
+
     private String email;
+
     private String fullName;
+
     private String role;
+
     private String employeeCode;
+
     private List<String> firms;
 }

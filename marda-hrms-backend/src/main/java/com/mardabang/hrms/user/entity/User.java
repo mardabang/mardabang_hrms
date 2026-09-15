@@ -35,6 +35,9 @@ public class User {
     @Column(nullable = false)
     @Builder.Default
     private Boolean active = true;
+    
+    @Column(name = "login_id", unique = true)
+    private String loginId;
 
     @ManyToMany(fetch = FetchType.EAGER)
     @JoinTable(
