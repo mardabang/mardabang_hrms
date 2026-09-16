@@ -1,9 +1,12 @@
-package com.mardabang.hrms.leave;
+package com.mardabang.hrms.leave.service;
 
 import com.mardabang.hrms.employee.entity.Employee;
 import com.mardabang.hrms.employee.repository.EmployeeRepository;
 import com.mardabang.hrms.firms.entity.Firm;
 import com.mardabang.hrms.firms.repository.FirmRepository;
+import com.mardabang.hrms.leave.LeavePolicy;
+import com.mardabang.hrms.leave.entity.LeaveRequest;
+import com.mardabang.hrms.leave.repository.LeaveRepository;
 import com.mardabang.hrms.user.entity.User;
 import com.mardabang.hrms.user.entity.Role;
 import com.mardabang.hrms.user.repository.UserRepository;
@@ -34,7 +37,7 @@ public class LeaveService {
     }
 
     private User actor(String email) {
-        User user = users.findByEmail(email).orElseThrow(() -> failure(HttpStatus.FORBIDDEN, "Account not found."));
+        User user = users.findByLoginId(email).or(() -> users.findByEmail(email)).orElseThrow(() -> failure(HttpStatus.FORBIDDEN, "Account not found."));
         if (!Boolean.TRUE.equals(user.getActive())) throw failure(HttpStatus.FORBIDDEN, "Account is inactive.");
         return user;
     }

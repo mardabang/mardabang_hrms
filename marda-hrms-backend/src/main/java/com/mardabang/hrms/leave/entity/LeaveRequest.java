@@ -1,4 +1,4 @@
-package com.mardabang.hrms.leave;
+package com.mardabang.hrms.leave.entity;
 
 import jakarta.persistence.*;
 import lombok.Getter;
