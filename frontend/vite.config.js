@@ -2,6 +2,12 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { createOfficeProxyHandler } from './server/officeProxy.js'
+
+const officeSecretPath = resolve('../marda-hrms-backend/.env.office-proxy-secret')
+const officeSecret = existsSync(officeSecretPath)
+  ? readFileSync(officeSecretPath, 'utf8').trim() : ''
+const approvedDesktop = '172.17.1.23'
 
 const certificatePath = resolve('.cert/hrms-cert.pem')
 const certificateKeyPath = resolve('.cert/hrms-key.pem')
@@ -22,7 +28,10 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'http://localhost:8080',
-        changeOrigin: true
+        changeOrigin: true,
+        configure(proxy) {
+          proxy.on('proxyReq', createOfficeProxyHandler(officeSecret, approvedDesktop))
+        }
       }
     }
   },
