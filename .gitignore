@@ -18,3 +18,11 @@
 # Operating system files
 .DS_Store
 Thumbs.db
+
+# Local TLS certificates and private keys
+frontend/.cert/
+
+# Employee photos and identity documents
+marda-hrms-backend/uploads/
+
+
