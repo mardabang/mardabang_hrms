@@ -15,6 +15,9 @@ public class EmployeeDto {
     private String employeeCode;
     private String name;
     private String department;
+    private Long departmentId;
+    public Long getDepartmentId() {return departmentId;}
+    public void setDepartmentId(Long value) {departmentId=value;}
     private String designation;
     private String firstName;
     private String lastName;
@@ -47,6 +50,12 @@ public class EmployeeDto {
     private Boolean active;
     private String status;
     private Long firmId;
+    private String firmCode;
+    private String firmName;
+    public String getFirmCode() { return firmCode; }
+    public void setFirmCode(String value) { firmCode=value; }
+    public String getFirmName() { return firmName; }
+    public void setFirmName(String value) { firmName=value; }
 
     // Getters and Setters
     public Long getId() {

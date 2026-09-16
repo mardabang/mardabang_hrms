@@ -18,6 +18,7 @@ import Profile from "./pages/Profile";
 import Register from "./pages/Register";
 import Reports from "./pages/Reports";
 import Salary from "./pages/Salary";
+import Departments from "./pages/Departments";
 import Settings from "./pages/Settings";
 import SupervisorAttendance from "./pages/SupervisorAttendance";
 import SupervisorDashboard from "./pages/SupervisorDashboard";
@@ -93,6 +94,7 @@ function App() {
           <Route path="/reports" element={<Page><Reports /></Page>} />
           <Route path="/activity" element={<Page><Activity /></Page>} />
           <Route path="/settings" element={<Page><Settings /></Page>} />
+          <Route path="/settings/departments" element={<Page><Departments /></Page>} />
           <Route path="/settings/employee-import" element={<Page><EmployeeImport /></Page>} />
           <Route path="/settings/backup" element={<Page><BackupRestore /></Page>} />
           <Route path="/firms/add" element={<Page><AddFirm /></Page>} />

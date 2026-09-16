@@ -40,6 +40,7 @@ export const toEmployeePayload = (employee, target = {}) => ({
     employmentType: employee.employmentType ?? target.employmentType ?? "",
     address: employee.address ?? target.address ?? "",
     firmId: employee.firmId ?? target.firmId,
+    departmentId: employee.departmentId ?? target.departmentId ?? null,
     department: employee.department ?? target.department ?? "",
     designation: employee.designation ?? target.designation ?? "",
     contact: employee.contact ?? target.contact ?? "",

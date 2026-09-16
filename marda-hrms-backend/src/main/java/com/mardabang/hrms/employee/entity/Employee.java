@@ -41,6 +41,11 @@ public class Employee {
 
     @Column(nullable = false)
     private String department;
+    @jakarta.persistence.ManyToOne
+    @jakarta.persistence.JoinColumn(name="department_id")
+    private com.mardabang.hrms.department.Department departmentRecord;
+    public com.mardabang.hrms.department.Department getDepartmentRecord() {return departmentRecord;}
+    public void setDepartmentRecord(com.mardabang.hrms.department.Department value) {departmentRecord=value;}
 
     @Column
     private String designation;

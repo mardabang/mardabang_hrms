@@ -43,19 +43,28 @@ public class SupervisorController {
         if (dto.getEmail() == null || dto.getEmail().isBlank()) {
             return ResponseEntity.badRequest().body("Employee email is required to create a login account.");
         }
+        if (dto.getContact() == null || !dto.getContact().trim().matches("[6-9]\\d{9}")) {
+            return ResponseEntity.badRequest().body("A valid 10-digit employee phone number is required.");
+        }
+        dto.setContact(dto.getContact().trim());
+        if (userService.mobileExists(dto.getContact()) || userService.loginIdExists(dto.getContact())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body("An account already exists for this phone number.");
+        }
         if (userService.emailExists(dto.getEmail())) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                     .body("A login account already exists for this email.");
         }
 
-        User creator = userService.getUserByEmail(authentication.getName())
+        User creator = userService.getUserByPrincipal(authentication.getName())
                 .orElseThrow(() -> new IllegalStateException("Authenticated user not found"));
 
         // Derive firmId from the creator instead of trusting client input
         if (creator.getFirms() == null || creator.getFirms().isEmpty()) {
             return ResponseEntity.badRequest().body("Supervisor is not assigned to any firm.");
         }
-        Firm creatorFirm = creator.getFirms().iterator().next();
+        Firm creatorFirm = creator.getFirms().stream()
+                .filter(f -> dto.getFirmId()==null || f.getId().equals(dto.getFirmId()))
+                .findFirst().orElseThrow(() -> new IllegalArgumentException("Selected company is not assigned to this supervisor."));
         dto.setFirmId(creatorFirm.getId());
 
         // 1. Create the HR record (reuses all existing validation)
@@ -71,6 +80,7 @@ public class SupervisorController {
                 .fullName(dto.getName())
                 .email(dto.getEmail())
                 .mobile(dto.getContact())
+                .loginId(dto.getContact())
                 .employeeCode(savedEmployee.getEmployeeCode())
                 .password(rawPassword) // hashed inside userService.saveUser
                 .role(Role.EMPLOYEE)
@@ -90,7 +100,7 @@ public class SupervisorController {
     @GetMapping("/employees")
     @PreAuthorize("hasAnyRole('ADMIN','INPUTER')")
     public ResponseEntity<?> myEmployees(Authentication authentication) {
-        User creator = userService.getUserByEmail(authentication.getName())
+        User creator = userService.getUserByPrincipal(authentication.getName())
                 .orElseThrow(() -> new IllegalStateException("Authenticated user not found"));
         return ResponseEntity.ok(employeeService.getEmployeesCreatedBy(creator.getId()));
     }

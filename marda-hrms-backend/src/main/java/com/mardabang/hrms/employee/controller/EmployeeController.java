@@ -51,15 +51,19 @@ public class EmployeeController {
         return ResponseEntity.ok(employeeService.getAllEmployees(firmId));
     }
 
+    private EmployeeDto withAssignedFirm(EmployeeDto dto) {
+        if(dto!=null && dto.getFirmId()!=null)firmRepository.findById(dto.getFirmId()).ifPresent(firm->{dto.setFirmCode(firm.getCode());dto.setFirmName(firm.getName());});
+        return dto;
+    }
     @GetMapping("/{id}")
     public ResponseEntity<EmployeeDto> getEmployeeById(@PathVariable Long id) {
-        EmployeeDto employee = employeeService.getEmployeeById(id);
+        EmployeeDto employee = withAssignedFirm(employeeService.getEmployeeById(id));
         return employee != null ? ResponseEntity.ok(employee) : ResponseEntity.notFound().build();
     }
 
     @GetMapping("/code/{employeeCode}")
     public ResponseEntity<EmployeeDto> getEmployeeByCode(@PathVariable String employeeCode) {
-        EmployeeDto employee = employeeService.getEmployeeByCode(employeeCode);
+        EmployeeDto employee = withAssignedFirm(employeeService.getEmployeeByCode(employeeCode));
         return employee != null ? ResponseEntity.ok(employee) : ResponseEntity.notFound().build();
     }
 

@@ -27,6 +27,7 @@ import lombok.RequiredArgsConstructor;
 public class EmployeeService {
 
     private final EmployeeRepository employeeRepository;
+    private final com.mardabang.hrms.department.DepartmentService departmentService;
     private final EmployeeDocumentStorage documentStorage;
     private final AttendanceRepository attendanceRepository;
 
@@ -333,6 +334,7 @@ public class EmployeeService {
 
     private Employee mapToEntity(EmployeeDto dto) {
         Employee employee = new Employee();
+        employee.setDepartmentRecord(departmentService.resolve(dto, null));
         employee.setFirmId(dto.getFirmId());
         employee.setEmployeeCode(dto.getEmployeeCode());
         employee.setName(dto.getName());
@@ -374,6 +376,7 @@ public class EmployeeService {
      * performs the change safely along with the required cascade.
      */
     private void applyUpdates(Employee employee, EmployeeDto dto) {
+        employee.setDepartmentRecord(departmentService.resolve(dto, employee));
         employee.setName(dto.getName() != null ? dto.getName() : employee.getName());
         employee.setDepartment(dto.getDepartment() != null ? dto.getDepartment() : employee.getDepartment());
         employee.setDesignation(dto.getDesignation() != null ? dto.getDesignation() : employee.getDesignation());
@@ -405,8 +408,9 @@ public class EmployeeService {
     }
 
     private void validateEmployee(EmployeeDto dto, boolean requireBankDetails) {
+        StatutoryAccountValidator.validate(dto);
         if (dto == null || isBlank(dto.getEmployeeCode()) || isBlank(dto.getName())
-                || isBlank(dto.getDepartment()) || isBlank(dto.getDesignation())
+                || (dto.getDepartmentId() == null && isBlank(dto.getDepartment())) || isBlank(dto.getDesignation())
                 || dto.getJoiningDate() == null || isBlank(dto.getWageType())
                 || dto.getMonthlySalary() == null || dto.getMonthlySalary().signum() <= 0
                 || isBlank(dto.getPaymentMode())) {
@@ -485,7 +489,8 @@ public class EmployeeService {
             .firmId(employee.getFirmId())
             .employeeCode(employee.getEmployeeCode())
             .name(employee.getName())
-            .department(employee.getDepartment())
+            .department(employee.getDepartmentRecord()!=null ? employee.getDepartmentRecord().getName() : employee.getDepartment())
+            .departmentId(employee.getDepartmentRecord()!=null ? employee.getDepartmentRecord().getId() : null)
             .designation(employee.getDesignation())
             .firstName(employee.getFirstName())
             .lastName(employee.getLastName())

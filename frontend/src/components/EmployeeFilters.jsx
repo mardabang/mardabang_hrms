@@ -1,4 +1,6 @@
 import React from "react";
+import { useFirm } from "../context/FirmContext";
+import useDepartments from "../hooks/useDepartments";
 
 const EmployeeFilter = ({
   search,
@@ -9,6 +11,8 @@ const EmployeeFilter = ({
   setStatus,
   onReset,
 }) => {
+  const { selectedFirm } = useFirm();
+  const { items: departments } = useDepartments(selectedFirm?.id, false);
   return (
     <div className="employee-filter">
       <div className="employee-search">
@@ -27,10 +31,7 @@ const EmployeeFilter = ({
         onChange={(e) => setDepartment(e.target.value)}
       >
         <option value="">All Departments</option>
-        <option value="Engineering">Engineering</option>
-        <option value="HR">HR</option>
-        <option value="Production">Production</option>
-        <option value="Finance">Finance</option>
+        {departments.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}
       </select>
 
       <select

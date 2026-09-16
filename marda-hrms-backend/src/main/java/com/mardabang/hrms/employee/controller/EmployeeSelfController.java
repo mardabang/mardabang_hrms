@@ -22,8 +22,10 @@ public class EmployeeSelfController {
 
     private final EmployeeService employeeService;
     private final UserService userService;
+    private final com.mardabang.hrms.firms.repository.FirmRepository firmRepository;
 
-    public EmployeeSelfController(EmployeeService employeeService, UserService userService) {
+    public EmployeeSelfController(EmployeeService employeeService, UserService userService, com.mardabang.hrms.firms.repository.FirmRepository firmRepository) {
+        this.firmRepository = firmRepository;
         this.employeeService = employeeService;
         this.userService = userService;
     }
@@ -32,7 +34,7 @@ public class EmployeeSelfController {
     @PreAuthorize("hasRole('EMPLOYEE')")
     public ResponseEntity<EmployeeDto> getMyProfile(Authentication authentication) {
         String employeeCode = resolveEmployeeCode(authentication);
-        EmployeeDto dto = employeeService.getEmployeeByCode(employeeCode);
+        EmployeeDto dto = withAssignedFirm(employeeService.getEmployeeByCode(employeeCode));
         return dto != null ? ResponseEntity.ok(dto) : ResponseEntity.notFound().build();
     }
 
@@ -42,14 +44,18 @@ public class EmployeeSelfController {
                                               @RequestBody EmployeeSelfUpdateRequest req) {
         String employeeCode = resolveEmployeeCode(authentication);
         try {
-            return ResponseEntity.ok(employeeService.updateOwnProfile(employeeCode, req));
+            return ResponseEntity.ok(withAssignedFirm(employeeService.updateOwnProfile(employeeCode, req)));
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.badRequest().body(java.util.Map.of("message", ex.getMessage()));
         }
     }
 
+    private EmployeeDto withAssignedFirm(EmployeeDto dto) {
+        if(dto!=null && dto.getFirmId()!=null)firmRepository.findById(dto.getFirmId()).ifPresent(firm->{dto.setFirmCode(firm.getCode());dto.setFirmName(firm.getName());});
+        return dto;
+    }
     private String resolveEmployeeCode(Authentication authentication) {
-        User user = userService.getUserByEmail(authentication.getName())
+        User user = userService.getUserByPrincipal(authentication.getName())
             .orElseThrow(() -> new IllegalStateException("Authenticated user not found"));
         if (user.getEmployeeCode() == null || user.getEmployeeCode().isBlank()) {
             throw new IllegalStateException("This account is not linked to an employee record.");

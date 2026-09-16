@@ -122,6 +122,7 @@ const handleNavClick = () => {
           <NavLink
             key={item.label}
             to={item.path}
+            end
             className={({ isActive }) =>
               `nav-item ${isActive ? "active" : ""}`
             }

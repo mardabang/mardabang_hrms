@@ -782,6 +782,15 @@ const Settings = () => {
 
           <div className="settings-links-grid">
 
+            <Link to="/settings/departments" className="settings-card-link">
+              <span className="material-symbols-outlined">factory</span>
+              <div>
+                <h3>Departments</h3>
+                <p>Add, rename and deactivate departments for the selected company.</p>
+              </div>
+              <span className="material-symbols-outlined">chevron_right</span>
+            </Link>
+
             <Link
               to="/settings/employee-import"
               className="settings-card-link"

@@ -4,14 +4,15 @@ import { addEmployee, downloadEmployeeDocument, getEmployeeById, hydrateEmployee
 import { addActivity } from "../data/activityLog";
 import { useAuth } from "../context/AuthContext";
 import { useFirm } from "../context/FirmContext";
+import useDepartments from "../hooks/useDepartments";
 import api from "../api/axios";
+import { normalizePfAccount, validateStatutoryAccounts } from "../utils/statutoryAccounts";
 
 const today = new Date().toISOString().slice(0, 10);
 const maxPdfSize = 5 * 1024 * 1024;
 
 const initialForm = {
   employeeCode: "",
-  name: "",
   firstName: "",
   lastName: "",
   gender: "",
@@ -25,6 +26,7 @@ const initialForm = {
   firmId: null,
   email: "",
   department: "",
+  departmentId: "",
   contact: "",
   designation: "",
   joiningDate: "",
@@ -47,7 +49,6 @@ const initialForm = {
   active: true,
 };
 
-const departments = ["Engineering", "HR", "Production", "Finance", "Maintenance", "Sales", "Administration"];
 const designations = ["Software Engineer", "Senior Developer", "HR Executive", "Production Supervisor", "Accountant", "Maintenance Technician", "Manager", "Operator"];
 const statutorySchemes = [
   { id: 1, name: "PF", employee: 12, employer: 12 },
@@ -64,6 +65,11 @@ const AddEmployee = () => {
   const { id } = useParams();
   const isEditMode = Boolean(id);
   const [formData, setFormData] = useState(initialForm);
+  const departmentFirmId = isEditMode ? formData.firmId : selectedFirm?.id;
+  const { items: departments, loading: departmentsLoading, error: departmentLoadError } = useDepartments(departmentFirmId);
+  useEffect(() => {
+    if (!isEditMode) setFormData((previous) => ({ ...previous, department: "", departmentId: "" }));
+  }, [departmentFirmId, isEditMode]);
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -85,8 +91,7 @@ const AddEmployee = () => {
       const selectedSchemeNames = String(employee.statutorySchemes || "").split(",").map((value) => value.trim()).filter(Boolean);
       setFormData({
         employeeCode: employee.employeeCode || employee.id || "",
-        name: employee.name || "",
-        firstName: employee.firstName || "",
+        firstName: employee.firstName || (!employee.lastName ? employee.name || "" : ""),
         lastName: employee.lastName || "",
         gender: employee.gender || "",
         dateOfBirth: employee.dateOfBirth || "",
@@ -99,6 +104,7 @@ const AddEmployee = () => {
         firmId: employee.firmId,
         email: employee.email || "",
         department: employee.department || "",
+        departmentId: employee.departmentId || "",
         contact: employee.contact || "",
         designation: employee.designation || "",
         joiningDate: employee.joiningDate || "",
@@ -127,17 +133,17 @@ const AddEmployee = () => {
 
   const validateForm = () => {
     const nextErrors = {};
+    Object.assign(nextErrors, validateStatutoryAccounts(formData.pfAccountNumber, formData.esiAccountNumber));
     const code = formData.employeeCode.trim();
-    const name = formData.name.trim();
+    const name = [formData.firstName.trim(), formData.lastName.trim()].filter(Boolean).join(" ");
     const salary = Number(formData.monthlySalary);
     const otRate = formData.otRate === "" ? null : Number(formData.otRate);
 
     if (!code) nextErrors.employeeCode = "Employee code is required.";
     else if (!/^[A-Z0-9][A-Z0-9-]{2,19}$/.test(code)) nextErrors.employeeCode = "Use 3–20 uppercase letters, numbers, or hyphens.";
 
-    if (!name) nextErrors.name = "Employee name is required.";
-    else if (name.length < 2 || name.length > 100) nextErrors.name = "Name must contain 2–100 characters.";
-    else if (!/^[\p{L}][\p{L} .'-]*$/u.test(name)) nextErrors.name = "Enter a valid employee name.";
+    if (!formData.firstName.trim()) nextErrors.firstName = "First name is required.";
+    else if (name.length < 2 || name.length > 100) nextErrors.firstName = "Full name must contain 2–100 characters.";
 
     for (const field of ["firstName", "lastName"]) {
       if (formData[field].trim() && (!/^[\p{L}][\p{L} .'-]*$/u.test(formData[field].trim()) || formData[field].trim().length > 100)) nextErrors[field] = "Enter a valid name, up to 100 characters.";
@@ -148,7 +154,7 @@ const AddEmployee = () => {
     if (formData.profilePhoto && (formData.profilePhoto.size > 2 * 1024 * 1024 || !["image/jpeg", "image/png", "image/webp"].includes(formData.profilePhoto.type))) nextErrors.profilePhoto = "Choose a JPG, PNG or WEBP image up to 2 MB.";
 
     if (!formData.designation) nextErrors.designation = "Designation is required.";
-    if (!formData.department) nextErrors.department = "Department is required.";
+    if (!formData.departmentId) nextErrors.department = "Department is required.";
     if (!formData.joiningDate) nextErrors.joiningDate = "Joining date is required.";
     else if (formData.joiningDate > today) nextErrors.joiningDate = "Joining date cannot be in the future.";
 
@@ -229,18 +235,19 @@ const AddEmployee = () => {
 
     const payload = {
       employeeCode: formData.employeeCode.trim(),
-      name: formData.name.trim(),
+      name: [formData.firstName.trim(), formData.lastName.trim()].filter(Boolean).join(" "),
       firstName: formData.firstName.trim(),
       lastName: formData.lastName.trim(),
       gender: formData.gender,
       dateOfBirth: formData.dateOfBirth || null,
       employmentType: formData.employmentType.trim(),
       address: formData.address.trim(),
-      pfAccountNumber: formData.pfAccountNumber.trim(),
+      pfAccountNumber: normalizePfAccount(formData.pfAccountNumber),
       esiAccountNumber: formData.esiAccountNumber.trim(),
       firmId: isEditMode ? formData.firmId : selectedFirm?.id,
       email: formData.email.trim(),
       department: formData.department,
+      departmentId: Number(formData.departmentId),
       contact: formData.contact,
       designation: formData.designation,
       joiningDate: formData.joiningDate,
@@ -315,9 +322,8 @@ const AddEmployee = () => {
           <div className="form-section-title"><span className="material-symbols-outlined section-icon">person</span><div><h3>Basic Details</h3><p>Enter the employee’s official information.</p></div></div>
           <div className="form-grid">
             <div className="form-group"><label htmlFor="employeeCode">Employee Code <RequiredMark /></label><input id="employeeCode" name="employeeCode" value={formData.employeeCode} onChange={handleChange} maxLength={20} required disabled={isEditMode} {...inputState("employeeCode")} /><small>{isEditMode ? "Employee code cannot be changed after creation." : "Enter the employee code assigned by your organization."}</small><FieldError id="employeeCode-error" message={errors.employeeCode} /></div>
-            <div className="form-group"><label htmlFor="name">Employee Name <RequiredMark /></label><input id="name" name="name" value={formData.name} onChange={handleChange} minLength={2} maxLength={100} required autoComplete="name" {...inputState("name")} /><FieldError id="name-error" message={errors.name} /></div>
             <div className="form-group"><label htmlFor="designation">Designation <RequiredMark /></label><select id="designation" name="designation" value={formData.designation} onChange={handleChange} required {...inputState("designation")}><option value="">Select Designation</option>{designations.map((designation) => <option key={designation} value={designation}>{designation}</option>)}</select><FieldError id="designation-error" message={errors.designation} /></div>
-            <div className="form-group"><label htmlFor="department">Department <RequiredMark /></label><select id="department" name="department" value={formData.department} onChange={handleChange} required {...inputState("department")}><option value="">Select Department</option>{departments.map((department) => <option key={department} value={department}>{department}</option>)}</select><FieldError id="department-error" message={errors.department} /></div>
+            <div className="form-group"><label htmlFor="department">Department <RequiredMark /></label><select id="department" name="departmentId" value={formData.departmentId} disabled={departmentsLoading || !departmentFirmId} onChange={(event) => { const chosen = departments.find((department) => String(department.id) === event.target.value); setFormData((previous) => ({ ...previous, departmentId: event.target.value, department: chosen?.name || "" })); }} required {...inputState("department")}><option value="">{departmentsLoading ? "Loading departments…" : "Select Department"}</option>{isEditMode && formData.departmentId && !departments.some((department) => String(department.id) === String(formData.departmentId)) && <option value={formData.departmentId}>{formData.department} (current)</option>}{departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}</select>{departmentLoadError && <p className="form-field-error" role="alert">{departmentLoadError}</p>}<FieldError id="department-error" message={errors.department} /></div>
             <div className="form-group"><label htmlFor="contact">Mobile Number <RequiredMark /></label><input id="contact" type="tel" inputMode="numeric" name="contact" value={formData.contact} onChange={handleChange} minLength={10} maxLength={10} required autoComplete="tel" placeholder="10-digit mobile number" {...inputState("contact")} /><FieldError id="contact-error" message={errors.contact} /></div>
             <div className="form-group"><label htmlFor="email">Email Address <span className="optional-label">Optional</span></label><input id="email" type="email" name="email" value={formData.email} onChange={handleChange} maxLength={150} autoComplete="email" placeholder="employee@example.com" {...inputState("email")} /><FieldError id="email-error" message={errors.email} /></div>
             <div className="form-group"><label htmlFor="joiningDate">Joining Date <RequiredMark /></label><input id="joiningDate" type="date" name="joiningDate" value={formData.joiningDate} onChange={handleChange} max={today} required {...inputState("joiningDate")} /><FieldError id="joiningDate-error" message={errors.joiningDate} /></div>
@@ -348,7 +354,7 @@ const AddEmployee = () => {
         <div className="form-section">
           <div className="form-section-title"><span className="material-symbols-outlined section-icon">person_book</span><div><h3>Personal and Employment Details</h3><p>Add the employee’s personal information and employment type.</p></div></div>
           <div className="form-grid">
-            {[['firstName', 'First Name', 'given-name'], ['lastName', 'Last Name', 'family-name']].map(([field, label, autocomplete]) => <div className="form-group" key={field}><label htmlFor={field}>{label}</label><input id={field} name={field} value={formData[field]} onChange={handleChange} maxLength={100} autoComplete={autocomplete} {...inputState(field)} /><FieldError id={`${field}-error`} message={errors[field]} /></div>)}
+            {[['firstName', 'First Name', 'given-name'], ['lastName', 'Last Name', 'family-name']].map(([field, label, autocomplete]) => <div className="form-group" key={field}><label htmlFor={field}>{label} {field === "firstName" && <RequiredMark />}</label><input id={field} name={field} value={formData[field]} onChange={handleChange} maxLength={100} required={field === "firstName"} autoComplete={autocomplete} {...inputState(field)} /><FieldError id={`${field}-error`} message={errors[field]} /></div>)}
             <div className="form-group"><label htmlFor="gender">Gender</label><select id="gender" name="gender" value={formData.gender} onChange={handleChange}><option value="">Select Gender</option>{["Male", "Female", "Other", "Prefer not to say"].map(value => <option key={value}>{value}</option>)}{formData.gender && !["Male", "Female", "Other", "Prefer not to say"].includes(formData.gender) && <option value={formData.gender}>{formData.gender}</option>}</select></div>
             <div className="form-group"><label htmlFor="dateOfBirth">Date of Birth</label><input id="dateOfBirth" name="dateOfBirth" type="date" max={today} value={formData.dateOfBirth} onChange={handleChange} autoComplete="bday" {...inputState("dateOfBirth")} /><FieldError id="dateOfBirth-error" message={errors.dateOfBirth} /></div>
             <div className="form-group"><label htmlFor="employmentType">Employment Type</label><input id="employmentType" name="employmentType" list="employment-types" maxLength={100} value={formData.employmentType} onChange={handleChange} placeholder="Select or enter employment type" /><datalist id="employment-types">{["Permanent", "Contract", "Temporary", "Apprentice", "Part-time"].map(value => <option value={value} key={value} />)}</datalist></div>
@@ -381,8 +387,8 @@ const AddEmployee = () => {
           <div className="form-section-title"><span className="material-symbols-outlined section-icon">account_balance_wallet</span><div><h3>Statutory Schemes</h3><p>Select schemes applicable to this employee.</p></div></div>
           <div className="checkbox-grid">{statutorySchemes.map((scheme) => <label key={scheme.id} className="checkbox-card"><input type="checkbox" checked={formData.schemes.includes(scheme.id)} onChange={() => handleSchemeChange(scheme.id)} /><div><strong>{scheme.name}</strong><span>Employee {scheme.employee}% / Employer {scheme.employer}%</span></div></label>)}</div>
           <div className="form-grid">
-            <div className="form-group"><label htmlFor="pfAccountNumber">PF Account Number</label><input id="pfAccountNumber" name="pfAccountNumber" maxLength={50} value={formData.pfAccountNumber} onChange={handleChange} /></div>
-            <div className="form-group"><label htmlFor="esiAccountNumber">ESI Account Number</label><input id="esiAccountNumber" name="esiAccountNumber" maxLength={50} value={formData.esiAccountNumber} onChange={handleChange} /></div>
+            <div className="form-group"><label htmlFor="pfAccountNumber">PF Account Number (Member ID)</label><input id="pfAccountNumber" name="pfAccountNumber" maxLength={26} value={formData.pfAccountNumber} onChange={handleChange} placeholder="MH/PUN/1234567/000/1234567" {...inputState("pfAccountNumber")} /><small>Optional. Enter the PF Member ID, not the UAN.</small><FieldError id="pfAccountNumber-error" message={errors.pfAccountNumber} /></div>
+            <div className="form-group"><label htmlFor="esiAccountNumber">ESIC Insurance Number</label><input id="esiAccountNumber" name="esiAccountNumber" inputMode="numeric" pattern="[0-9]{10}" maxLength={10} value={formData.esiAccountNumber} onChange={handleChange} placeholder="10-digit insurance number" {...inputState("esiAccountNumber")} /><small>Optional. Exactly 10 digits when entered.</small><FieldError id="esiAccountNumber-error" message={errors.esiAccountNumber} /></div>
           </div>
         </div>
 
