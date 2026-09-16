@@ -436,6 +436,7 @@ const Attendance = () => {
       latitude: getCheckInCoordinate(record, "latitude"),
 
       longitude: getCheckInCoordinate(record, "longitude"),
+      checkInVerificationSource: record.checkInVerificationSource,
     };
   };
 
@@ -576,6 +577,7 @@ const Attendance = () => {
 
       longitude:
         record.longitude,
+      checkInVerificationSource: record.checkInVerificationSource,
     });
   };
 
@@ -657,7 +659,6 @@ const Attendance = () => {
       employeeCode,
       employeeName: entry.employee.name,
       department: entry.employee.department,
-      team: entry.employee.team || "General",
       shift: shiftName,
       attendanceDate: dateKey,
       checkInTime: entry.status === "P" ? (entry.checkIn || null) : null,
@@ -1855,13 +1856,14 @@ const Attendance = () => {
                 <div>
 
                   <strong>
-                    No location recorded
+                    {entry.checkInVerificationSource === "OFFICE_DESKTOP"
+                      ? "Office desktop verified" : "No location recorded"}
                   </strong>
 
                   <p>
-                    This attendance entry
-                    does not have location
-                    data.
+                    {entry.checkInVerificationSource === "OFFICE_DESKTOP"
+                      ? "Check-in was verified from the approved office desktop. GPS coordinates were not recorded."
+                      : "This attendance entry does not have location data."}
                   </p>
 
                 </div>

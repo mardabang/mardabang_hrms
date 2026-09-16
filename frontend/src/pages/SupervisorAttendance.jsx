@@ -15,6 +15,8 @@ import {
   getShiftDetails,
 } from "../data/attendance";
 
+import { getPrecisePosition } from "../utils/preciseLocation";
+
 /* =========================================================
    HELPERS
 ========================================================= */
@@ -219,7 +221,7 @@ const SupervisorAttendance = () => {
   const [shiftsLoading, setShiftsLoading] =
     useState(true);
 
-  const [team, setTeam] = useState([]);
+  const [staff, setStaff] = useState([]);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] =
@@ -339,22 +341,22 @@ const SupervisorAttendance = () => {
   ======================================================= */
 
   const linkedEmployee = useMemo(() => {
-    return team.find(
+    return staff.find(
       (employee) =>
         normalizeEmployeeCode(employee.id) ===
         normalizeEmployeeCode(employeeCode)
     );
-  }, [team, employeeCode]);
+  }, [staff, employeeCode]);
 
   /* =======================================================
-     FILTER TEAM
+     FILTER EMPLOYEE
   ======================================================= */
 
-  const filteredTeam = useMemo(() => {
+  const filteredStaff = useMemo(() => {
     const searchValue =
       search.trim().toLowerCase();
 
-    return team.filter((emp) => {
+    return staff.filter((emp) => {
       const employeeName = String(
         emp.name || ""
       ).toLowerCase();
@@ -382,7 +384,7 @@ const SupervisorAttendance = () => {
       );
     });
   }, [
-    team,
+    staff,
     search,
     statusFilter,
   ]);
@@ -401,7 +403,7 @@ const SupervisorAttendance = () => {
             record.employeeCode
           );
 
-        setTeam((current) =>
+        setStaff((current) =>
           current.map((emp) => {
             if (
               normalizeEmployeeCode(
@@ -567,13 +569,13 @@ const SupervisorAttendance = () => {
           );
 
         /* =================================================
-           BUILD TEAM
+           BUILD EMPLOYEE
 
            Employee Master SHIFT is the
            source of truth.
         ================================================= */
 
-        const teamData =
+        const staffData =
           activeEmployees.map(
             (emp) => {
               const employeeCodeValue =
@@ -618,9 +620,6 @@ const SupervisorAttendance = () => {
                   emp.department ||
                   "--",
 
-                team:
-                  emp.team ||
-                  "General",
 
                 shift:
                   employeeShift,
@@ -663,7 +662,7 @@ const SupervisorAttendance = () => {
             }
           );
 
-        setTeam(teamData);
+        setStaff(staffData);
 
         /* =================================================
            CURRENT SUPERVISOR ATTENDANCE
@@ -744,21 +743,21 @@ const SupervisorAttendance = () => {
            ================================================= */
 
         const pendingCount =
-          teamData.filter(
+          staffData.filter(
             (employee) =>
               employee.status ===
                 "Pending"
           ).length;
 
         const absentCount =
-          teamData.filter(
+          staffData.filter(
             (employee) =>
               employee.status ===
               "Absent"
           ).length;
 
         const missingCheckoutCount =
-          teamData.filter(
+          staffData.filter(
             (employee) =>
               employee.status ===
               "Missing Checkout"
@@ -836,57 +835,29 @@ const SupervisorAttendance = () => {
      GET CURRENT GPS
   ======================================================= */
 
-  const getCurrentLocation =
-    () =>
-      new Promise(
-        (resolve, reject) => {
-          if (!window.isSecureContext) {
-            reject(
-              new Error(
-                "Location requires HTTPS or localhost."
-              )
-            );
-            return;
-          }
-
-          if (
-            !navigator.geolocation
-          ) {
-            reject(
-              new Error(
-                "Geolocation is not supported by this browser."
-              )
-            );
-            return;
-          }
-
-          navigator.geolocation.getCurrentPosition(
-            ({ coords }) =>
-              resolve({
-                latitude:
-                  coords.latitude,
-                longitude:
-                  coords.longitude,
-              }),
-
-            () =>
-              reject(
-                new Error(
-                  "Unable to get your current location. Please allow location access."
-                )
-              ),
-
-            {
-              enableHighAccuracy:
-                true,
-
-              timeout: 15000,
-
-              maximumAge: 30000,
-            }
-          );
-        }
+  const getCurrentLocation = () =>
+    new Promise((resolve, reject) => {
+      if (!window.isSecureContext) {
+        reject(new Error("Location requires HTTPS or localhost."));
+        return;
+      }
+      if (!navigator.geolocation) {
+        reject(new Error("Geolocation is not supported by this browser."));
+        return;
+      }
+      // Uses watchPosition internally with a 30s deadline,
+      // retrying until accuracy <= 50m instead of giving up
+      // after a single reading.
+      getPrecisePosition(
+        (position) =>
+          resolve({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            accuracy: position.coords.accuracy,
+          }),
+        (error) => reject(error)
       );
+    });
 
   /* =======================================================
      SUPERVISOR SELF CHECK-IN
@@ -950,10 +921,6 @@ const SupervisorAttendance = () => {
                 user?.department ||
                 "Supervisor",
 
-              team:
-                linkedEmployee?.team ||
-                user?.team ||
-                "General",
 
               /*
                * Employee Master shift.
@@ -971,6 +938,7 @@ const SupervisorAttendance = () => {
 
               longitude:
                 location.longitude,
+              accuracy: location.accuracy,
             }
           );
 
@@ -1069,6 +1037,7 @@ const SupervisorAttendance = () => {
 
               longitude:
                 location.longitude,
+              accuracy: location.accuracy,
             }
           );
 
@@ -1106,7 +1075,7 @@ const SupervisorAttendance = () => {
       action
     ) => {
       const employee =
-        team.find(
+        staff.find(
           (emp) =>
             emp.id === employeeId
         );
@@ -1145,6 +1114,7 @@ const SupervisorAttendance = () => {
 
           const location =
             await getCurrentLocation();
+          
 
           response =
             await api.post(
@@ -1162,9 +1132,6 @@ const SupervisorAttendance = () => {
                 department:
                   employee.department,
 
-                team:
-                  employee.team ||
-                  "General",
 
                 /*
                  * Employee Master is the
@@ -1181,6 +1148,7 @@ const SupervisorAttendance = () => {
 
                 longitude:
                   location.longitude,
+                accuracy: location.accuracy,
               }
             );
         }
@@ -1223,6 +1191,7 @@ const SupervisorAttendance = () => {
 
                 longitude:
                   location.longitude,
+                accuracy: location.accuracy,
               }
             );
         }
@@ -1408,9 +1377,6 @@ const SupervisorAttendance = () => {
           department:
             employee.department,
 
-          team:
-            employee.team ||
-            "General",
 
           /*
            * Employee Master shift.
@@ -1498,7 +1464,7 @@ const SupervisorAttendance = () => {
           <h1>Attendance</h1>
 
           <p>
-            Track your team's daily attendance
+            Track your staff's daily attendance
             and manage quick check-ins.
           </p>
         </div>
@@ -1747,7 +1713,7 @@ const SupervisorAttendance = () => {
       </div>
 
       {/* ===================================================
-          TEAM SUMMARY
+          EMPLOYEE SUMMARY
       =================================================== */}
 
       <div className="employee-summary-grid">
@@ -1797,7 +1763,7 @@ const SupervisorAttendance = () => {
       </div>
 
       {/* ===================================================
-          TEAM TABLE
+          EMPLOYEE TABLE
       =================================================== */}
 
       <div
@@ -1923,7 +1889,7 @@ const SupervisorAttendance = () => {
 
             <tbody>
 
-              {filteredTeam.map(
+              {filteredStaff.map(
                 (emp) => {
                   /*
                    * Employee Master shift.
@@ -2103,7 +2069,7 @@ const SupervisorAttendance = () => {
                 }
               )}
 
-              {!filteredTeam.length && (
+              {!filteredStaff.length && (
                 <tr>
                   <td colSpan="7">
                     No employees found.

@@ -8,6 +8,7 @@ import {
 } from "../utils/employeePortal";
 import useLeaveRequests from "../hooks/useLeaveRequests";
 import api from "../api/axios";
+import { getPrecisePosition } from "../utils/preciseLocation";
 import PhotoViewerModal from "../components/PhotoViewerModal";
 import "../styles/employee-portal.css";
 
@@ -163,21 +164,25 @@ async function getBrowserLocation() {
       return;
     }
 
-    navigator.geolocation.getCurrentPosition(
-      (pos) =>
+    getPrecisePosition(
+      (pos) => {
+        const coords = pos.coords;
         resolve({
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-        }),
-      () =>
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          accuracy: coords.accuracy,
+        });
+      },
+      (error) =>
         reject(
           new Error(
-            "Please allow location access to check in/out."
+            error.message
           )
         ),
       {
         enableHighAccuracy: true,
-        timeout: 10000,
+        timeout: 30000,
+        maximumAge: 0,
       }
     );
   });
@@ -296,12 +301,13 @@ export function EmployeeDashboard() {
     try {
       setPunching(true);
 
-      const { latitude, longitude } =
+      const { latitude, longitude, accuracy } =
         await getBrowserLocation();
 
       await api.post("/me/attendance/checkin", {
         latitude,
         longitude,
+        accuracy,
       });
 
       await loadToday();
@@ -329,12 +335,13 @@ export function EmployeeDashboard() {
     try {
       setPunching(true);
 
-      const { latitude, longitude } =
+      const { latitude, longitude, accuracy } =
         await getBrowserLocation();
 
       await api.post("/me/attendance/checkout", {
         latitude,
         longitude,
+        accuracy,
       });
 
       await loadToday();
@@ -1531,6 +1538,10 @@ export function MyProfile() {
                       profile?.employeeCode,
                     ],
                     [
+                      "Assigned Firm",
+                      profile?.firmCode ? `${profile.firmCode}${profile.firmName ? ` · ${profile.firmName}` : ""}` : profile?.firmId ? "Firm details unavailable" : "Not assigned",
+                    ],
+                    [
                       "Department",
                       profile?.department,
                     ],
@@ -1625,7 +1636,9 @@ export function MyProfile() {
                       Assigned Firm
                     </dt>
                     <dd>
-                      Not assigned
+                      {profile?.firmCode
+                        ? `${profile.firmCode}${profile.firmName ? ` · ${profile.firmName}` : ""}`
+                        : profile?.firmId ? "Firm details unavailable" : "Not assigned"}
                     </dd>
                   </div>
 

@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
+import { getPrecisePosition } from "../utils/preciseLocation";
 import { useAuth } from "../context/AuthContext";
 import { useFirm } from "../context/FirmContext";
 import { useNavigate } from "react-router-dom";
 import StatCard from "../components/StatCard";
+import useDepartments from "../hooks/useDepartments";
 
 const formatTime = (value) => {
   if (!value) return "--";
@@ -105,7 +107,7 @@ const SupervisorDashboard = () => {
   const [employees, setEmployees] = useState([]);
 
   const [department, setDepartment] = useState("");
-  const [team, setTeam] = useState("All Teams");
+  const { items: departmentRecords, loading: departmentsLoading, error: departmentsError } = useDepartments(selectedFirm?.id, false);
 
   const [search, setSearch] = useState("");
 
@@ -248,10 +250,6 @@ const SupervisorDashboard = () => {
             department:
               employee.department || "Unassigned",
 
-            team:
-              record?.team ||
-              employee.team ||
-              "General",
 
             /*
              * Shift comes from attendance record.
@@ -320,49 +318,19 @@ const SupervisorDashboard = () => {
   --------------------------------------------------------- */
 
   const departments = useMemo(() => {
-    return [
-      ...new Set(
-        employees.map(
-          (employee) => employee.department
-        )
-      ),
-    ];
-  }, [employees]);
+    return departmentRecords.map((record) => record.name);
+  }, [departmentRecords]);
 
   useEffect(() => {
-    if (!departments.length) {
-      setDepartment("");
-      return;
-    }
+    if (!departmentsLoading && !departmentsError && department && !departments.includes(department)) setDepartment("");
+  }, [department, departments, departmentsLoading, departmentsError]);
 
-    if (
-      !department ||
-      !departments.includes(department)
-    ) {
-      setDepartment(departments[0]);
-    }
-  }, [department, departments]);
+  useEffect(() => { setDepartment(""); }, [selectedFirm?.id]);
 
   /* ---------------------------------------------------------
-     TEAMS
+     DEPARTMENT FILTER
   --------------------------------------------------------- */
 
-  const teams = useMemo(() => {
-    const departmentEmployees = employees.filter(
-      (employee) =>
-        !department ||
-        employee.department === department
-    );
-
-    return [
-      "All Teams",
-      ...new Set(
-        departmentEmployees.map(
-          (employee) => employee.team
-        )
-      ),
-    ];
-  }, [department, employees]);
 
   /* ---------------------------------------------------------
      FILTER EMPLOYEES
@@ -378,9 +346,6 @@ const SupervisorDashboard = () => {
         !department ||
         employee.department === department;
 
-      const teamMatch =
-        team === "All Teams" ||
-        employee.team === team;
 
       const shiftMatch =
         !shift ||
@@ -397,7 +362,6 @@ const SupervisorDashboard = () => {
 
       return (
         departmentMatch &&
-        teamMatch &&
         shiftMatch &&
         searchMatch
       );
@@ -405,7 +369,6 @@ const SupervisorDashboard = () => {
   }, [
     department,
     employees,
-    team,
     shift,
     search,
   ]);
@@ -461,7 +424,6 @@ const SupervisorDashboard = () => {
 
   const handleDepartmentChange = (event) => {
     setDepartment(event.target.value);
-    setTeam("All Teams");
   };
 
   /* ---------------------------------------------------------
@@ -490,26 +452,27 @@ const SupervisorDashboard = () => {
         return;
       }
 
-      navigator.geolocation.getCurrentPosition(
+      getPrecisePosition(
         ({ coords }) => {
           resolve({
             latitude: coords.latitude,
             longitude: coords.longitude,
+            accuracy: coords.accuracy,
           });
         },
 
-        () => {
+        (error) => {
           reject(
             new Error(
-              "Location unavailable. Please allow location access."
+              error.message
             )
           );
         },
 
         {
           enableHighAccuracy: true,
-          timeout: 15000,
-          maximumAge: 30000,
+          timeout: 30000,
+          maximumAge: 0,
         }
       );
     });
@@ -546,7 +509,6 @@ const SupervisorDashboard = () => {
             employeeName: employee.name,
             department:
               employee.department,
-            team: employee.team,
 
             // Shift selected from backend
             shift: employee.shift,
@@ -558,20 +520,21 @@ const SupervisorDashboard = () => {
 
             longitude:
               location.longitude,
+            accuracy: location.accuracy,
           }
         );
       } else {
+        const location = await getCurrentLocation();
         await api.post(
           `/attendance/checkout/${encodeURIComponent(
             employee.id
           )}`,
-          null,
           {
-            params: {
-              recordedBy,
-              firmCode:
-                selectedFirm.code,
-            },
+            recordedBy,
+            firmCode: selectedFirm.code,
+            latitude: location.latitude,
+            longitude: location.longitude,
+            accuracy: location.accuracy,
           }
         );
       }
@@ -622,7 +585,7 @@ const SupervisorDashboard = () => {
       <div className="page-header">
         <div>
           <h1>Supervisor Dashboard</h1>
-          <p>Live overview of your team's attendance and daily check-ins.</p>
+          <p>Live overview of employee attendance and daily check-ins.</p>
         </div>
         <div className="page-header-actions">
           <button className="primary-button" onClick={() => navigate("/employees/add")}>
@@ -656,7 +619,7 @@ const SupervisorDashboard = () => {
             <h3>Attendance Scope</h3>
 
             <p>
-              Narrow the view by department, team, and shift.
+              Narrow the view by department and shift.
             </p>
           </div>
 
@@ -679,15 +642,12 @@ const SupervisorDashboard = () => {
               <select
                 id="supervisor-department"
                 value={department}
+                disabled={departmentsLoading || !selectedFirm?.id}
                 onChange={
                   handleDepartmentChange
                 }
               >
-                {departments.length === 0 && (
-                  <option value="">
-                    No Departments
-                  </option>
-                )}
+                <option value="">{departmentsLoading ? "Loading departments…" : "All Departments"}</option>
 
                 {departments.map(
                   (departmentName) => (
@@ -701,39 +661,8 @@ const SupervisorDashboard = () => {
                 )}
               </select>
             </div>
-          </div>
-
-          {/* Team */}
-
-          <div className="scope-select-card">
-            <label htmlFor="supervisor-team">
-              Team
-            </label>
-
-            <div className="supervisor-select-wrapper">
-              <span className="material-symbols-outlined">
-                groups
-              </span>
-
-              <select
-                id="supervisor-team"
-                value={team}
-                onChange={(event) =>
-                  setTeam(
-                    event.target.value
-                  )
-                }
-              >
-                {teams.map((teamName) => (
-                  <option
-                    key={teamName}
-                    value={teamName}
-                  >
-                    {teamName}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {departmentsError && <p className="form-field-error" role="alert">{departmentsError}</p>}
+            {!departmentsLoading && !departmentsError && !departments.length && selectedFirm?.id && <small>No departments have been added for this company.</small>}
           </div>
 
           {/* Shift */}
@@ -870,7 +799,7 @@ const SupervisorDashboard = () => {
         <div className="supervisor-table-header">
           <div>
             <h3>
-              Today's Team Attendance
+              Today's Employee Attendance
             </h3>
 
             <p>
@@ -999,8 +928,6 @@ const SupervisorDashboard = () => {
 
                             <small>
                               {employee.department}
-                              {" • "}
-                              {employee.team}
                             </small>
 
                           </div>
