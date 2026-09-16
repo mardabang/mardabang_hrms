@@ -1,6 +1,10 @@
 package com.mardabang.hrms.attendance.dto;
 
 public class SelfCheckInRequest {
+    private Double accuracy;
+    public Double getAccuracy() { return accuracy; }
+    public void setAccuracy(Double accuracy) { this.accuracy = accuracy; }
+
     private Double latitude;
     private Double longitude;
 

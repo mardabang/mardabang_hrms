@@ -20,6 +20,7 @@ import com.mardabang.hrms.attendance.entity.AttendanceStatus;
 import com.mardabang.hrms.attendance.entity.ShiftType;
 import com.mardabang.hrms.attendance.repository.AttendanceRepository;
 import java.util.stream.Collectors;
+import com.mardabang.hrms.attendance.service.AttendanceLocationPolicy;
 
 import org.springframework.scheduling.annotation.Scheduled;
 
@@ -38,15 +39,7 @@ public class AttendanceService {
      * =========================================================
      */
 
-    private static final double COMPANY_LATITUDE = 16.720236;
-
-    private static final double COMPANY_LONGITUDE = 74.460701;
-
-    /*
-     * Employee must be within 150 meters.
-     */
-    private static final double ALLOWED_RADIUS_METERS = 150.0;
-
+    private final AttendanceLocationPolicy locationPolicy;
 
     /*
      * =========================================================
@@ -63,6 +56,8 @@ public class AttendanceService {
 
 
     private final AttendanceRepository attendanceRepository;
+    private final AttendanceAccess access;
+    private final java.time.Clock attendanceClock;
 
 
     /*
@@ -80,9 +75,11 @@ public class AttendanceService {
             );
         }
 
-        LocalDate today = LocalDate.now();
+        access.checkIn(request);
 
-        LocalTime now = LocalTime.now().withNano(0);
+        LocalDate today = LocalDate.now(attendanceClock);
+
+        LocalTime now = LocalTime.now(attendanceClock).withNano(0);
 
         /*
          * Employee check-in always requires valid GPS.
@@ -90,6 +87,8 @@ public class AttendanceService {
         validateLocation(
                 request.getLatitude(),
                 request.getLongitude(),
+                request.getAccuracy(),
+                request.getFirmCode(),
                 "check-in"
         );
 
@@ -152,10 +151,6 @@ public class AttendanceService {
                 request.getDepartment()
         );
 
-        record.setTeam(
-                request.getTeam()
-        );
-
         /*
          * Shift comes from the employee/attendance request.
          *
@@ -184,6 +179,8 @@ public class AttendanceService {
         record.setRecordedBy(
                 request.getRecordedBy()
         );
+
+        record.setCheckInAccuracy(request.getAccuracy());
 
         record.setCheckInLatitude(
                 request.getLatitude()
@@ -256,10 +253,12 @@ public class AttendanceService {
             );
         }
 
-        LocalDate today = LocalDate.now();
+        access.checkOut(employeeCode, request);
+
+        LocalDate today = LocalDate.now(attendanceClock);
 
         LocalTime checkoutTime =
-                LocalTime.now().withNano(0);
+                LocalTime.now(attendanceClock).withNano(0);
 
 
         /*
@@ -273,6 +272,8 @@ public class AttendanceService {
         validateLocation(
                 request.getLatitude(),
                 request.getLongitude(),
+                request.getAccuracy(),
+                request.getFirmCode(),
                 "check-out"
         );
 
@@ -355,6 +356,8 @@ public class AttendanceService {
          */
 
         try {
+
+            record.setCheckOutAccuracy(request.getAccuracy());
 
             record.setCheckOutLatitude(
                     request.getLatitude()
@@ -457,10 +460,12 @@ public class AttendanceService {
         }
 
 
+        access.manual(request);
+
         LocalDate attendanceDate =
                 request.getAttendanceDate() != null
                         ? request.getAttendanceDate()
-                        : LocalDate.now();
+                        : LocalDate.now(attendanceClock);
 
 
         /*
@@ -479,6 +484,11 @@ public class AttendanceService {
                         .orElse(null);
 
 
+        if(existing!=null) {
+            request.setEmployeeName(existing.getEmployeeName());
+            request.setDepartment(existing.getDepartment());
+            request.setShift(existing.getShift());
+        }
         boolean isManualCheckout =
                 request.getCheckOutTime() != null;
 
@@ -557,10 +567,6 @@ public class AttendanceService {
 
         record.setDepartment(
                 request.getDepartment()
-        );
-
-        record.setTeam(
-                request.getTeam()
         );
 
         record.setShift(
@@ -809,8 +815,9 @@ public class AttendanceService {
     @Transactional(readOnly = true)
     public List<AttendanceRecord> getTodayRecords(
             String firmCode) {
+        access.readCompany(firmCode);
 
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(attendanceClock);
 
         if (firmCode == null ||
                 firmCode.trim().isEmpty()) {
@@ -906,34 +913,32 @@ public class AttendanceService {
 
     /*
      * =========================================================
-     * DEPARTMENT + TEAM
+     * DEPARTMENT
      * =========================================================
      */
 
     @Transactional(readOnly = true)
-    public List<AttendanceRecord> getByDepartmentAndTeam(
+    public List<AttendanceRecord> getByDepartment(
             String department,
-            String team,
             String firmCode) {
+        access.readCompany(firmCode);
 
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(attendanceClock);
 
         if (firmCode == null ||
                 firmCode.trim().isEmpty()) {
 
             return attendanceRepository
-                    .findByAttendanceDateAndDepartmentAndTeamOrderByEmployeeNameAsc(
+                    .findByAttendanceDateAndDepartmentOrderByEmployeeNameAsc(
                             today,
-                            department,
-                            team
+                            department
                     );
         }
 
         return attendanceRepository
-                .findByAttendanceDateAndDepartmentAndTeamAndFirmCodeOrderByEmployeeNameAsc(
+                .findByAttendanceDateAndDepartmentAndFirmCodeOrderByEmployeeNameAsc(
                         today,
                         department,
-                        team,
                         firmCode
                 );
     }
@@ -949,6 +954,7 @@ public class AttendanceService {
     public List<AttendanceRecord> getByDate(
             LocalDate date,
             String firmCode) {
+        access.readCompany(firmCode);
 
         if (date == null) {
 
@@ -985,6 +991,7 @@ public class AttendanceService {
             LocalDate from,
             LocalDate to,
             String firmCode) {
+        access.readCompany(firmCode);
 
         if (from == null || to == null) {
 
@@ -1243,6 +1250,8 @@ public class AttendanceService {
 
     private boolean isEightHourShift(
             String shift) {
+        var configured = configuredShift(shift);
+        if(configured!=null)return configured.getHours()==8;
 
         if (shift == null ||
                 shift.trim().isEmpty()) {
@@ -1281,6 +1290,8 @@ public class AttendanceService {
 
     private LocalTime getShiftStartTime(
             String shift) {
+        var configured = configuredShift(shift);
+        if(configured!=null)return LocalTime.parse(configured.getStartTime());
 
         if (shift == null ||
                 shift.trim().isEmpty()) {
@@ -1336,7 +1347,14 @@ public class AttendanceService {
      * SHIFT END TIME
      * =========================================================
      */
+    private ShiftType configuredShift(String shift) {
+        if(shift==null || shift.isBlank())return ShiftType.GENERAL;
+        for(ShiftType type:ShiftType.values())if(type.name().equalsIgnoreCase(shift.trim()) || type.getLabel().equalsIgnoreCase(shift.trim()))return type;
+        return null;
+    }
     private LocalTime getShiftEndTime(String shift) {
+        var configured = configuredShift(shift);
+        if(configured!=null)return LocalTime.parse(configured.getEndTime());
 
         if (shift == null || shift.trim().isEmpty()) {
             // General shift
@@ -1376,133 +1394,10 @@ public class AttendanceService {
      * Haversine distance calculation.
      */
 
-    private void validateLocation(
-            Double latitude,
-            Double longitude,
-            String action) {
-
-        if (latitude == null ||
-                longitude == null) {
-
-            throw new IllegalArgumentException(
-                    "Location is required for employee "
-                            + action
-                            + "."
-            );
-        }
-
-
-        if (latitude < -90 ||
-                latitude > 90) {
-
-            throw new IllegalArgumentException(
-                    "Invalid latitude."
-            );
-        }
-
-
-        if (longitude < -180 ||
-                longitude > 180) {
-
-            throw new IllegalArgumentException(
-                    "Invalid longitude."
-            );
-        }
-
-
-        double distance =
-                calculateDistanceInMeters(
-                        COMPANY_LATITUDE,
-                        COMPANY_LONGITUDE,
-                        latitude,
-                        longitude
-                );
-
-
-        log.info(
-                "ATTENDANCE {} location validation: lat={}, lon={}, distance={}m, allowed={}m",
-                action,
-                latitude,
-                longitude,
-                distance,
-                ALLOWED_RADIUS_METERS
-        );
-
-
-        if (distance > ALLOWED_RADIUS_METERS) {
-
-            throw new IllegalArgumentException(
-                    String.format(
-                            Locale.US,
-                            "You are outside the allowed company location. Distance: %.2f meters. Allowed radius: %.0f meters.",
-                            distance,
-                            ALLOWED_RADIUS_METERS
-                    )
-            );
-        }
+    private void validateLocation(Double latitude, Double longitude,
+            Double accuracy, String firmCode, String action) {
+        locationPolicy.validate(latitude, longitude, accuracy, firmCode, action);
     }
-
-
-    /*
-     * =========================================================
-     * HAVERSINE DISTANCE
-     * =========================================================
-     */
-
-    private double calculateDistanceInMeters(
-            double latitude1,
-            double longitude1,
-            double latitude2,
-            double longitude2) {
-
-        final double earthRadius =
-                6_371_000.0;
-
-
-        double lat1Radians =
-                Math.toRadians(latitude1);
-
-        double lat2Radians =
-                Math.toRadians(latitude2);
-
-        double deltaLatitude =
-                Math.toRadians(
-                        latitude2 - latitude1
-                );
-
-        double deltaLongitude =
-                Math.toRadians(
-                        longitude2 - longitude1
-                );
-
-
-        double a =
-                Math.sin(deltaLatitude / 2)
-                        * Math.sin(deltaLatitude / 2)
-                        +
-                Math.cos(lat1Radians)
-                        * Math.cos(lat2Radians)
-                        * Math.sin(deltaLongitude / 2)
-                        * Math.sin(deltaLongitude / 2);
-
-
-        double c =
-                2
-                        * Math.atan2(
-                                Math.sqrt(a),
-                                Math.sqrt(1 - a)
-                        );
-
-
-        return earthRadius * c;
-    }
-
-
-    /*
-     * =========================================================
-     * EMPLOYEE SELF ATTENDANCE
-     * =========================================================
-     */
 
     @Transactional(readOnly = true)
     public AttendanceRecord getTodayRecordForEmployee(
@@ -1511,7 +1406,7 @@ public class AttendanceService {
         return attendanceRepository
                 .findByEmployeeCodeAndAttendanceDate(
                         employeeCode,
-                        LocalDate.now()
+                        LocalDate.now(attendanceClock)
                 )
                 .orElse(null);
     }
@@ -1593,12 +1488,12 @@ public class AttendanceService {
     @Scheduled(fixedRate = 60_000)
     public void markMissingCheckouts() {
 
-        LocalDate today = LocalDate.now();
-        LocalTime now = LocalTime.now().withNano(0);
+        LocalDate today = LocalDate.now(attendanceClock);
+
 
         List<AttendanceRecord> records =
                 attendanceRepository
-                        .findByAttendanceDateOrderByCheckInTimeAsc(today);
+                        .findByCheckInTimeIsNotNullAndCheckOutTimeIsNullAndAttendanceDateLessThanEqual(today);
 
         for (AttendanceRecord record : records) {
 
@@ -1621,7 +1516,7 @@ public class AttendanceService {
             }
 
             LocalTime shiftEnd =
-                    getShiftStartTime(record.getShift());
+                    getShiftEndTime(record.getShift());
 
             if (shiftEnd == null) {
                 continue;
@@ -1630,19 +1525,13 @@ public class AttendanceService {
             /*
              * Only mark after shift end.
              */
-            if (now.isAfter(shiftEnd)) {
+            java.time.LocalDateTime due=record.getAttendanceDate().atTime(shiftEnd);
+            if(!shiftEnd.isAfter(getShiftStartTime(record.getShift())))due=due.plusDays(1);
+            if (java.time.LocalDateTime.now(attendanceClock).isAfter(due)) {
 
-                record.setStatus(
-                        AttendanceStatus.MISSING_CHECKOUT
-                );
-
-                /*
-                 * OT must remain zero until actual checkout
-                 * is entered by employee/supervisor.
-                 */
-                record.setOvertime(0.0);
-
-                attendanceRepository.save(record);
+                int changed=attendanceRepository.markMissingCheckout(record.getId(),AttendanceStatus.MISSING_CHECKOUT,
+                    java.util.List.of(AttendanceStatus.PRESENT,AttendanceStatus.LATE,AttendanceStatus.PENDING));
+                if(changed==0)continue;
 
                 log.info(
                         "MISSING CHECKOUT: employeeCode={}, firmCode={}, shift={}, shiftEnd={}",

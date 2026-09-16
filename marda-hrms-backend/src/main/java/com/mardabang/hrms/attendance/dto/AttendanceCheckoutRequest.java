@@ -20,12 +20,13 @@ public class AttendanceCheckoutRequest {
     @NotBlank(message = "Recorded by is required.")
     private String recordedBy;
 
-    @NotNull(message = "Checkout latitude is required.")
     @DecimalMin(value = "-90.0", message = "Invalid checkout latitude.")
     @DecimalMax(value = "90.0", message = "Invalid checkout latitude.")
     private Double latitude;
 
-    @NotNull(message = "Checkout longitude is required.")
+    @DecimalMin(value = "0.0", inclusive = false, message = "Location accuracy must be positive.")
+    private Double accuracy;
+
     @DecimalMin(value = "-180.0", message = "Invalid checkout longitude.")
     @DecimalMax(value = "180.0", message = "Invalid checkout longitude.")
     private Double longitude;

@@ -14,7 +14,6 @@ public class AttendanceRecordDto {
     private String employeeCode;
     private String employeeName;
     private String department;
-    private String team;
     private String shift;
     private LocalDate attendanceDate;
     private LocalTime checkInTime;

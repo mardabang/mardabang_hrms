@@ -47,11 +47,10 @@ public class AttendanceController {
         try {
 
             log.info(
-                    "CHECK-IN request: employeeCode={}, employeeName={}, department={}, team={}, shift={}, firmCode={}, lat={}, lon={}, recordedBy={}",
+                    "CHECK-IN request: employeeCode={}, employeeName={}, department={}, shift={}, firmCode={}, lat={}, lon={}, recordedBy={}",
                     request.getEmployeeCode(),
                     request.getEmployeeName(),
                     request.getDepartment(),
-                    request.getTeam(),
                     request.getShift(),
                     request.getFirmCode(),
                     request.getLatitude(),
@@ -64,6 +63,10 @@ public class AttendanceController {
 
             return ResponseEntity.ok(record);
 
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            return ResponseEntity.status(e.getStatusCode()).body(new ErrorResponse(e.getReason()));
+        } catch (org.springframework.dao.DataIntegrityViolationException | org.springframework.dao.ConcurrencyFailureException e) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse("Attendance changed concurrently. Refresh and retry."));
         } catch (IllegalArgumentException e) {
 
             log.warn(
@@ -145,6 +148,10 @@ public class AttendanceController {
 
             return ResponseEntity.ok(record);
 
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            return ResponseEntity.status(e.getStatusCode()).body(new ErrorResponse(e.getReason()));
+        } catch (org.springframework.dao.DataIntegrityViolationException | org.springframework.dao.ConcurrencyFailureException e) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse("Attendance changed concurrently. Refresh and retry."));
         } catch (IllegalArgumentException e) {
 
             log.warn(
@@ -219,20 +226,18 @@ public class AttendanceController {
 
     /*
      * =========================================================
-     * DEPARTMENT + TEAM
+     * DEPARTMENT
      * =========================================================
      */
 
     @GetMapping("/department")
     public ResponseEntity<List<AttendanceRecord>> getByDepartment(
             @RequestParam String department,
-            @RequestParam String team,
             @RequestParam(required = false) String firmCode) {
 
         return ResponseEntity.ok(
-                attendanceService.getByDepartmentAndTeam(
+                attendanceService.getByDepartment(
                         department,
-                        team,
                         firmCode
                 )
         );
@@ -310,6 +315,10 @@ public class AttendanceController {
 
             return ResponseEntity.ok(record);
 
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+            return ResponseEntity.status(e.getStatusCode()).body(new ErrorResponse(e.getReason()));
+        } catch (org.springframework.dao.DataIntegrityViolationException | org.springframework.dao.ConcurrencyFailureException e) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse("Attendance changed concurrently. Refresh and retry."));
         } catch (IllegalArgumentException e) {
 
             log.warn(
@@ -371,6 +380,8 @@ public class AttendanceController {
      * =========================================================
      */
 
+    @org.springframework.web.bind.annotation.ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+    public ResponseEntity<?> accessFailure(org.springframework.web.server.ResponseStatusException e) {return ResponseEntity.status(e.getStatusCode()).body(new ErrorResponse(e.getReason()));}
     record ErrorResponse(String message) {
     }
 }

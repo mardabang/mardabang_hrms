@@ -20,7 +20,6 @@ public class AttendanceManualRequest {
 
     private String department;
 
-    private String team;
 
     private String shift;
 

@@ -42,8 +42,6 @@ public class AttendanceRecord {
     @Column(nullable = false)
     private String department;
 
-    @Column(nullable = false)
-    private String team;
 
     @Column(nullable = false)
     private String shift;
@@ -68,6 +66,18 @@ public class AttendanceRecord {
 
     @Column
     private Double checkInLongitude;
+
+    @Column
+    private Double checkInAccuracy;
+
+    @Column
+    private String checkInVerificationSource;
+
+    @Column
+    private String checkOutVerificationSource;
+
+    @Column
+    private Double checkOutAccuracy;
 
     @Column(nullable = false)
     @Builder.Default

@@ -11,6 +11,10 @@ import com.mardabang.hrms.attendance.entity.AttendanceRecord;
 
 @Repository
 public interface AttendanceRepository extends JpaRepository<AttendanceRecord, Long> {
+    List<AttendanceRecord> findByCheckInTimeIsNotNullAndCheckOutTimeIsNullAndAttendanceDateLessThanEqual(LocalDate date);
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Query("update AttendanceRecord a set a.status = :status, a.overtime = 0.0 where a.id = :id and a.checkInTime is not null and a.checkOutTime is null and a.status in :eligible")
+    int markMissingCheckout(@org.springframework.data.repository.query.Param("id") Long id, @org.springframework.data.repository.query.Param("status") com.mardabang.hrms.attendance.entity.AttendanceStatus status, @org.springframework.data.repository.query.Param("eligible") java.util.Collection<com.mardabang.hrms.attendance.entity.AttendanceStatus> eligible);
 
     /*
      * ---------------------------------------------------------
@@ -27,10 +31,9 @@ public interface AttendanceRepository extends JpaRepository<AttendanceRecord, Lo
             LocalDate to
     );
 
-    List<AttendanceRecord> findByAttendanceDateAndDepartmentAndTeamOrderByEmployeeNameAsc(
+    List<AttendanceRecord> findByAttendanceDateAndDepartmentOrderByEmployeeNameAsc(
             LocalDate attendanceDate,
-            String department,
-            String team
+            String department
     );
 
     Optional<AttendanceRecord> findByEmployeeCodeAndAttendanceDate(
@@ -77,6 +80,7 @@ public interface AttendanceRepository extends JpaRepository<AttendanceRecord, Lo
      * It prevents updating an employee's attendance record
      * belonging to another firm.
      */
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
     Optional<AttendanceRecord> findByEmployeeCodeAndAttendanceDateAndFirmCode(
             String employeeCode,
             LocalDate attendanceDate,
@@ -90,10 +94,9 @@ public interface AttendanceRepository extends JpaRepository<AttendanceRecord, Lo
             String firmCode
     );
 
-    List<AttendanceRecord> findByAttendanceDateAndDepartmentAndTeamAndFirmCodeOrderByEmployeeNameAsc(
+    List<AttendanceRecord> findByAttendanceDateAndDepartmentAndFirmCodeOrderByEmployeeNameAsc(
             LocalDate attendanceDate,
             String department,
-            String team,
             String firmCode
     );
 }

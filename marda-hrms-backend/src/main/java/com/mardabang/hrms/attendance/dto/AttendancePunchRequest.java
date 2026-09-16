@@ -21,8 +21,6 @@ public class AttendancePunchRequest {
     @NotBlank
     private String department;
 
-    @NotBlank
-    private String team;
 
     @NotBlank
     private String shift;
@@ -33,12 +31,13 @@ public class AttendancePunchRequest {
     @NotBlank
     private String firmCode;
 
-    @NotNull
     @DecimalMin(value = "-90.0")
     @DecimalMax(value = "90.0")
     private Double latitude;
 
-    @NotNull
+    @DecimalMin(value = "0.0", inclusive = false, message = "Location accuracy must be positive.")
+    private Double accuracy;
+
     @DecimalMin(value = "-180.0")
     @DecimalMax(value = "180.0")
     private Double longitude;

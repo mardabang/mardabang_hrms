@@ -165,13 +165,7 @@ public class EmployeeSelfAttendanceController {
                     employee.getDepartment()
             );
 
-            /*
-             * Employee Master currently does not have a
-             * separate team field.
-             */
-            punch.setTeam(
-                    employee.getDepartment()
-            );
+
 
 
             /*
@@ -195,6 +189,8 @@ public class EmployeeSelfAttendanceController {
             /*
              * Employee GPS
              */
+            punch.setAccuracy(req.getAccuracy());
+
             punch.setLatitude(
                     req.getLatitude()
             );
@@ -210,6 +206,10 @@ public class EmployeeSelfAttendanceController {
 
             return ResponseEntity.ok(record);
 
+        } catch (org.springframework.web.server.ResponseStatusException ex) {
+            return ResponseEntity.status(ex.getStatusCode()).body(Map.of("message",ex.getReason()));
+        } catch (org.springframework.dao.DataIntegrityViolationException | org.springframework.dao.ConcurrencyFailureException ex) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message","Attendance changed concurrently. Refresh and retry."));
         } catch (IllegalArgumentException ex) {
 
             return ResponseEntity
@@ -335,6 +335,8 @@ public class EmployeeSelfAttendanceController {
                     employee.getEmployeeCode()
             );
 
+            checkoutRequest.setAccuracy(req.getAccuracy());
+
             checkoutRequest.setLatitude(
                     req.getLatitude()
             );
@@ -376,6 +378,10 @@ public class EmployeeSelfAttendanceController {
 
             return ResponseEntity.ok(record);
 
+        } catch (org.springframework.web.server.ResponseStatusException ex) {
+            return ResponseEntity.status(ex.getStatusCode()).body(Map.of("message",ex.getReason()));
+        } catch (org.springframework.dao.DataIntegrityViolationException | org.springframework.dao.ConcurrencyFailureException ex) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message","Attendance changed concurrently. Refresh and retry."));
         } catch (IllegalArgumentException ex) {
 
             return ResponseEntity
@@ -494,7 +500,7 @@ public class EmployeeSelfAttendanceController {
 
         User user =
                 userService
-                        .getUserByEmail(
+                        .getUserByPrincipal(
                                 authentication.getName()
                         )
                         .orElseThrow(

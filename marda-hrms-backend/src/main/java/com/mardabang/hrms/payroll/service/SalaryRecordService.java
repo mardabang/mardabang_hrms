@@ -316,7 +316,11 @@ public class SalaryRecordService {
 
             if (status == AttendanceStatus.PRESENT
                     || status == AttendanceStatus.LATE
-                    || status == AttendanceStatus.COMPLETED) {
+                    || status == AttendanceStatus.COMPLETED
+                    || status == AttendanceStatus.PAID_LEAVE
+                    || status == AttendanceStatus.HOLIDAY
+                    || (status == AttendanceStatus.MISSING_CHECKOUT && attendance.getCheckInTime()!=null)
+                    || (status == AttendanceStatus.WEEKLY_OFF && Boolean.TRUE.equals(payrollRule.getWeeklyOffPaid()))) {
 
                 paidDays = paidDays.add(BigDecimal.ONE);
             }
