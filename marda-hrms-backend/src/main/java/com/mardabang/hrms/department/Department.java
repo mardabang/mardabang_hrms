@@ -7,7 +7,7 @@ import com.mardabang.hrms.firms.entity.Firm;
 @Entity @Getter @Setter
 @Table(name="departments", uniqueConstraints=@UniqueConstraint(columnNames={"firm_id","name_key"}))
 public class Department {
-    @Id @GeneratedValue(strategy=GenerationType.IDENTITY) private Long id;
+    @Id @GeneratedValue(strategy=GenerationType.IDENTITY) @Column(columnDefinition="BIGINT UNSIGNED") private Long id;
     @ManyToOne(optional=false) @JoinColumn(name="firm_id",nullable=false) private Firm firm;
     @Column(nullable=false,length=100) private String name;
     @Column(name="name_key",nullable=false,length=100) private String nameKey;

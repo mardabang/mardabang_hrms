@@ -42,7 +42,11 @@ public class Employee {
     @Column(nullable = false)
     private String department;
     @jakarta.persistence.ManyToOne
-    @jakarta.persistence.JoinColumn(name="department_id")
+    @jakarta.persistence.JoinColumn(
+        name="department_id",
+        columnDefinition="BIGINT UNSIGNED",
+        foreignKey=@jakarta.persistence.ForeignKey(value=jakarta.persistence.ConstraintMode.NO_CONSTRAINT)
+    )
     private com.mardabang.hrms.department.Department departmentRecord;
     public com.mardabang.hrms.department.Department getDepartmentRecord() {return departmentRecord;}
     public void setDepartmentRecord(com.mardabang.hrms.department.Department value) {departmentRecord=value;}
