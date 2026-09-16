@@ -35,7 +35,7 @@ public class CreditController {
     @PostMapping
     public ResponseEntity<EmployeeCreditRecord> issueCredit(@Valid @RequestBody IssueCreditRequest request,
                                                              Authentication authentication) {
-        User admin = userService.getUserByEmail(authentication.getName())
+        User admin = userService.getUserByPrincipal(authentication.getName())
                 .orElseThrow(() -> new IllegalStateException("Authenticated user not found"));
         return ResponseEntity.ok(creditService.issueCredit(request, admin.getId()));
     }

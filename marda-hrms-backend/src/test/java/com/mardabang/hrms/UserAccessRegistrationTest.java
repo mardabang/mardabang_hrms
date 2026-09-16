@@ -23,7 +23,7 @@ class UserAccessRegistrationTest {
     UserService users = mock(UserService.class);
     EmployeeService employees = mock(EmployeeService.class);
     FirmRepository firms = mock(FirmRepository.class);
-    AuthController controller = new AuthController(users, mock(JwtUtil.class), mock(PasswordEncoder.class), employees, mock(OtpService.class), mock(PasswordResetService.class), firms);
+    AuthController controller = new AuthController(users, mock(JwtUtil.class), mock(PasswordEncoder.class), employees, mock(PasswordResetService.class), firms);
     Firm firm = new Firm(1L, "MBIPL", "Firm", true);
     EmployeeDto employee = new EmployeeDto();
     RegisterRequest request = new RegisterRequest();
