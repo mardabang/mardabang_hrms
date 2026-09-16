@@ -26,3 +26,6 @@ frontend/.cert/
 marda-hrms-backend/uploads/
 
 
+
+.postman/
+postman/
