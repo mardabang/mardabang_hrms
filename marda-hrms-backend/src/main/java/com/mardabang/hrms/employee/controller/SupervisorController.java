@@ -6,13 +6,15 @@ import java.util.Map;
 import java.util.Set;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import com.mardabang.hrms.employee.dto.EmployeeDto;
-import com.mardabang.hrms.employee.dto.EmployeeRegistrationRequest;
 import com.mardabang.hrms.employee.service.EmployeeService;
 import com.mardabang.hrms.firms.entity.Firm;
 import com.mardabang.hrms.user.entity.Role;
@@ -34,11 +36,15 @@ public class SupervisorController {
         this.userService = userService;
     }
 
-    @PostMapping("/employees")
+    @PostMapping(value = "/employees", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasAnyRole('ADMIN','INPUTER')")
-    public ResponseEntity<?> registerEmployee(@Valid @RequestBody EmployeeRegistrationRequest request,
-                                               Authentication authentication) {
-        EmployeeDto dto = request.getEmployee();
+    @Transactional
+    public ResponseEntity<?> registerEmployee(
+            @Valid @RequestPart("employee") EmployeeDto dto,
+            @RequestPart("aadharDocument") MultipartFile aadharDocument,
+            @RequestPart("panDocument") MultipartFile panDocument,
+            @RequestPart(value = "photo", required = false) MultipartFile photo,
+            Authentication authentication) {
 
         if (dto.getEmail() == null || dto.getEmail().isBlank()) {
             return ResponseEntity.badRequest().body("Employee email is required to create a login account.");
@@ -68,13 +74,11 @@ public class SupervisorController {
         dto.setFirmId(creatorFirm.getId());
 
         // 1. Create the HR record (reuses all existing validation)
-        EmployeeDto savedEmployee = employeeService.createEmployee(dto);
+        EmployeeDto savedEmployee = employeeService.createEmployeeWithDocuments(dto, aadharDocument, panDocument);
         employeeService.setCreatedBy(savedEmployee.getEmployeeCode(), creator.getId());
 
         // 2. Create the linked login account
-        String rawPassword = (request.getPassword() == null || request.getPassword().isBlank())
-                ? generateTempPassword()
-                : request.getPassword();
+        String rawPassword = generateTempPassword();
 
         User employeeUser = User.builder()
                 .fullName(dto.getName())
@@ -88,6 +92,9 @@ public class SupervisorController {
                 .firms(new HashSet<>(Set.of(creatorFirm)))
                 .build();
         userService.saveUser(employeeUser);
+        if (photo != null && !photo.isEmpty()) {
+            employeeService.uploadEmployeePhoto(savedEmployee.getEmployeeCode(), photo);
+        }
 
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
                 "message", "Employee and login account created.",

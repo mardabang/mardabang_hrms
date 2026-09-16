@@ -160,7 +160,8 @@ const AddEmployee = () => {
 
     if (!formData.contact) nextErrors.contact = "Mobile number is required.";
     else if (!/^[6-9]\d{9}$/.test(formData.contact)) nextErrors.contact = "Enter a valid 10-digit Indian mobile number.";
-    if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) nextErrors.email = "Enter a valid email address.";
+    if (!isEditMode && user?.role === "SUPERVISOR" && !formData.email.trim()) nextErrors.email = "Email is required to create the employee login account.";
+    else if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) nextErrors.email = "Enter a valid email address.";
 
     if (!Number.isFinite(salary) || salary <= 0) nextErrors.monthlySalary = "Enter a salary greater than zero.";
     else if (salary > 99999999.99) nextErrors.monthlySalary = "Salary must be below ₹10 crore.";
@@ -275,8 +276,12 @@ const AddEmployee = () => {
     await updateEmployee(id, payload, { aadharDocument: formData.aadharFile, panDocument: formData.panFile });
     addActivity({ icon: "edit", title: "Employee profile updated", description: `${payload.name} (${payload.employeeCode}) details were updated.`, path: "/employees" });
   } else if (user?.role === "SUPERVISOR") {
-    // Supervisor path: creates Employee HR record + linked login account together
-    const response = await api.post("/supervisor/employees", { employee: payload });
+    const registration = new FormData();
+    registration.append("employee", new Blob([JSON.stringify(payload)], { type: "application/json" }));
+    registration.append("aadharDocument", formData.aadharFile);
+    registration.append("panDocument", formData.panFile);
+    if (formData.profilePhoto) registration.append("photo", formData.profilePhoto);
+    const response = await api.post("/supervisor/employees", registration);
     addActivity({ icon: "person_add", title: "New employee added", description: `${payload.name} (${payload.employeeCode}) was added.`, path: "/employees" });
     alert(`Employee created. Temporary password: ${response.data.tempPassword}\n\nShare this with the employee — it won't be shown again.`);
   } else {
@@ -325,7 +330,7 @@ const AddEmployee = () => {
             <div className="form-group"><label htmlFor="designation">Designation <RequiredMark /></label><select id="designation" name="designation" value={formData.designation} onChange={handleChange} required {...inputState("designation")}><option value="">Select Designation</option>{designations.map((designation) => <option key={designation} value={designation}>{designation}</option>)}</select><FieldError id="designation-error" message={errors.designation} /></div>
             <div className="form-group"><label htmlFor="department">Department <RequiredMark /></label><select id="department" name="departmentId" value={formData.departmentId} disabled={departmentsLoading || !departmentFirmId} onChange={(event) => { const chosen = departments.find((department) => String(department.id) === event.target.value); setFormData((previous) => ({ ...previous, departmentId: event.target.value, department: chosen?.name || "" })); }} required {...inputState("department")}><option value="">{departmentsLoading ? "Loading departments…" : "Select Department"}</option>{isEditMode && formData.departmentId && !departments.some((department) => String(department.id) === String(formData.departmentId)) && <option value={formData.departmentId}>{formData.department} (current)</option>}{departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}</select>{departmentLoadError && <p className="form-field-error" role="alert">{departmentLoadError}</p>}<FieldError id="department-error" message={errors.department} /></div>
             <div className="form-group"><label htmlFor="contact">Mobile Number <RequiredMark /></label><input id="contact" type="tel" inputMode="numeric" name="contact" value={formData.contact} onChange={handleChange} minLength={10} maxLength={10} required autoComplete="tel" placeholder="10-digit mobile number" {...inputState("contact")} /><FieldError id="contact-error" message={errors.contact} /></div>
-            <div className="form-group"><label htmlFor="email">Email Address <span className="optional-label">Optional</span></label><input id="email" type="email" name="email" value={formData.email} onChange={handleChange} maxLength={150} autoComplete="email" placeholder="employee@example.com" {...inputState("email")} /><FieldError id="email-error" message={errors.email} /></div>
+            <div className="form-group"><label htmlFor="email">Email Address {!isEditMode && user?.role === "SUPERVISOR" ? <RequiredMark /> : <span className="optional-label">Optional</span>}</label><input id="email" type="email" name="email" value={formData.email} onChange={handleChange} maxLength={150} autoComplete="email" placeholder="employee@example.com" required={!isEditMode && user?.role === "SUPERVISOR"} {...inputState("email")} /><FieldError id="email-error" message={errors.email} /></div>
             <div className="form-group"><label htmlFor="joiningDate">Joining Date <RequiredMark /></label><input id="joiningDate" type="date" name="joiningDate" value={formData.joiningDate} onChange={handleChange} max={today} required {...inputState("joiningDate")} /><FieldError id="joiningDate-error" message={errors.joiningDate} /></div>
           </div>
         </div>
@@ -359,7 +364,7 @@ const AddEmployee = () => {
             <div className="form-group"><label htmlFor="dateOfBirth">Date of Birth</label><input id="dateOfBirth" name="dateOfBirth" type="date" max={today} value={formData.dateOfBirth} onChange={handleChange} autoComplete="bday" {...inputState("dateOfBirth")} /><FieldError id="dateOfBirth-error" message={errors.dateOfBirth} /></div>
             <div className="form-group"><label htmlFor="employmentType">Employment Type</label><input id="employmentType" name="employmentType" list="employment-types" maxLength={100} value={formData.employmentType} onChange={handleChange} placeholder="Select or enter employment type" /><datalist id="employment-types">{["Permanent", "Contract", "Temporary", "Apprentice", "Part-time"].map(value => <option value={value} key={value} />)}</datalist></div>
             <div className="form-group"><label htmlFor="address">Address</label><textarea id="address" name="address" rows={3} maxLength={255} value={formData.address} onChange={handleChange} autoComplete="street-address" /></div>
-            {user?.role === "ADMIN" && <div className="form-group"><label htmlFor="profilePhoto">Profile Photo</label><input id="profilePhoto" name="profilePhoto" type="file" accept="image/jpeg,image/png,image/webp" onChange={handleFileChange} {...inputState("profilePhoto")} /><small>JPG, PNG or WEBP, up to 2 MB.</small>{formData.profilePhotoName && <small>Current photo: {formData.profilePhotoName}</small>}<FieldError id="profilePhoto-error" message={errors.profilePhoto} /></div>}
+            {(user?.role === "ADMIN" || user?.role === "SUPERVISOR") && <div className="form-group"><label htmlFor="profilePhoto">Profile Photo</label><input id="profilePhoto" name="profilePhoto" type="file" accept="image/jpeg,image/png,image/webp" onChange={handleFileChange} {...inputState("profilePhoto")} /><small>JPG, PNG or WEBP, up to 2 MB.</small>{formData.profilePhotoName && <small>Current photo: {formData.profilePhotoName}</small>}<FieldError id="profilePhoto-error" message={errors.profilePhoto} /></div>}
           </div>
         </div>
 
