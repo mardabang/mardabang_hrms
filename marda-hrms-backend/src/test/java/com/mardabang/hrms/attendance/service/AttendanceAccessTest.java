@@ -26,6 +26,8 @@ class AttendanceAccessTest {
     @Test void rejectsWrongCompany(){employee.setFirmId(2L);assertThrows(ResponseStatusException.class,()->access.checkIn(punch()));}
     @Test void inactiveEmployeeCannotPunch(){employee.setActive(false);assertThrows(ResponseStatusException.class,()->access.checkIn(punch()));}
     @Test void inactiveAccountCannotRead(){user.setActive(false);assertThrows(ResponseStatusException.class,()->access.readCompany("MBIPL"));}
-    @Test void replacesClientMetadataWithAuthoritativeValues(){var r=punch();access.checkIn(r);assertEquals("Actual Name",r.getEmployeeName());assertEquals("Sizing",r.getDepartment());assertEquals("TWELVE_HOURS",r.getShift());assertEquals("phone",r.getRecordedBy());verify(employees).findForAttendance("EMP1");}
+    @Test void replacesClientMetadataWithAuthoritativeValues(){var r=punch();assertEquals(AttendanceVerification.SUPERVISOR_RECORDED,access.checkIn(r));assertEquals("Actual Name",r.getEmployeeName());assertEquals("Sizing",r.getDepartment());assertEquals("TWELVE_HOURS",r.getShift());assertEquals("phone",r.getRecordedBy());verify(employees).findForAttendance("EMP1");}
+    @Test void employeePunchUsesStrictGpsVerification(){user.setRole(Role.EMPLOYEE);user.setEmployeeCode("EMP1");assertEquals(AttendanceVerification.EMPLOYEE_GPS,access.checkIn(punch()));}
+    @Test void adminPunchRecordsLocationWithoutGeofence(){user.setRole(Role.ADMIN);assertEquals(AttendanceVerification.ADMIN_RECORDED,access.checkIn(punch()));}
     @Test void employeesCannotUseManualBypass(){user.setRole(Role.EMPLOYEE);user.setEmployeeCode("EMP1");var r=new AttendanceManualRequest();r.setEmployeeCode("EMP1");r.setFirmCode("MBIPL");assertThrows(ResponseStatusException.class,()->access.manual(r));}
 }

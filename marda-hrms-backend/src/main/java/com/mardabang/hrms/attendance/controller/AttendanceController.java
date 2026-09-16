@@ -382,6 +382,18 @@ public class AttendanceController {
 
     @org.springframework.web.bind.annotation.ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
     public ResponseEntity<?> accessFailure(org.springframework.web.server.ResponseStatusException e) {return ResponseEntity.status(e.getStatusCode()).body(new ErrorResponse(e.getReason()));}
+
+    @org.springframework.web.bind.annotation.ExceptionHandler(
+            org.springframework.web.bind.MethodArgumentNotValidException.class)
+    public ResponseEntity<?> invalidRequest(
+            org.springframework.web.bind.MethodArgumentNotValidException exception) {
+        String message = exception.getBindingResult().getFieldErrors().stream()
+                .findFirst()
+                .map(error -> error.getField() + ": " + error.getDefaultMessage())
+                .orElse("Attendance request is invalid.");
+        return ResponseEntity.badRequest().body(new ErrorResponse(message));
+    }
+
     record ErrorResponse(String message) {
     }
 }

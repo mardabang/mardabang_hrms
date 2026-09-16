@@ -15,11 +15,32 @@ import {
   getShiftDetails,
 } from "../data/attendance";
 
-import { getPrecisePosition } from "../utils/preciseLocation";
+import { getRecordedPosition } from "../utils/preciseLocation";
 
 /* =========================================================
    HELPERS
 ========================================================= */
+
+const getApiErrorMessage = (error, fallback) => {
+  const response = error?.response?.data;
+
+  if (typeof response === "string" && response.trim()) {
+    return response;
+  }
+
+  if (response?.message) {
+    return response.message;
+  }
+
+  if (Array.isArray(response?.errors) && response.errors.length) {
+    return response.errors
+      .map((item) => item?.defaultMessage || item?.message)
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  return error?.message || fallback;
+};
 
 const formatDisplayTime = (value) => {
   if (!value) return "--";
@@ -845,10 +866,8 @@ const SupervisorAttendance = () => {
         reject(new Error("Geolocation is not supported by this browser."));
         return;
       }
-      // Uses watchPosition internally with a 30s deadline,
-      // retrying until accuracy <= 50m instead of giving up
-      // after a single reading.
-      getPrecisePosition(
+      // Supervisor location is audit evidence and is not geofence-enforced.
+      getRecordedPosition(
         (position) =>
           resolve({
             latitude: position.coords.latitude,
@@ -882,6 +901,13 @@ const SupervisorAttendance = () => {
       if (!selectedShift) {
         setError(
           "Employee shift is not configured."
+        );
+        return;
+      }
+
+      if (!linkedEmployee) {
+        setError(
+          `Your supervisor account is linked to employee code ${employeeCode}, but that employee was not found in the selected firm. Ask an administrator to correct the account's employee link.`
         );
         return;
       }
@@ -953,12 +979,7 @@ const SupervisorAttendance = () => {
           err
         );
 
-        setError(
-          err?.response?.data
-            ?.message ||
-            err?.message ||
-            "Check-in failed."
-        );
+        setError(getApiErrorMessage(err, "Check-in failed."));
       } finally {
         setLoading(false);
       }
@@ -967,7 +988,7 @@ const SupervisorAttendance = () => {
   /* =======================================================
      SUPERVISOR SELF CHECK-OUT
 
-     GPS REQUIRED
+     Location is recorded for audit and is not geofence-enforced.
   ======================================================= */
 
   const handleCheckOut =
@@ -975,6 +996,13 @@ const SupervisorAttendance = () => {
       if (!employeeCode) {
         setError(
           "Your login account has no employee code."
+        );
+        return;
+      }
+
+      if (!linkedEmployee) {
+        setError(
+          `Your supervisor account is linked to employee code ${employeeCode}, but that employee was not found in the selected firm. Ask an administrator to correct the account's employee link.`
         );
         return;
       }
@@ -1052,12 +1080,7 @@ const SupervisorAttendance = () => {
           err
         );
 
-        setError(
-          err?.response?.data
-            ?.message ||
-            err?.message ||
-            "Check-out failed."
-        );
+        setError(getApiErrorMessage(err, "Check-out failed."));
       } finally {
         setLoading(false);
       }
@@ -1066,7 +1089,7 @@ const SupervisorAttendance = () => {
   /* =======================================================
      SUPERVISOR PUNCHES ANOTHER EMPLOYEE
 
-     CHECK-IN / NORMAL CHECK-OUT USE GPS
+     The supervisor device location is retained as audit evidence.
   ======================================================= */
 
   const handlePunchEmployee =
@@ -1207,12 +1230,7 @@ const SupervisorAttendance = () => {
           err
         );
 
-        setError(
-          err?.response?.data
-            ?.message ||
-            err?.message ||
-            `Could not ${action} employee.`
-        );
+        setError(getApiErrorMessage(err, `Could not ${action} employee.`));
       } finally {
         setLoading(false);
       }
@@ -2319,4 +2337,3 @@ const SupervisorAttendance = () => {
 };
 
 export default SupervisorAttendance;
-

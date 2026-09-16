@@ -75,22 +75,16 @@ public class AttendanceService {
             );
         }
 
-        access.checkIn(request);
+        AttendanceVerification verification = access.checkIn(request);
 
         LocalDate today = LocalDate.now(attendanceClock);
 
         LocalTime now = LocalTime.now(attendanceClock).withNano(0);
 
-        /*
-         * Employee check-in always requires valid GPS.
-         */
-        validateLocation(
-                request.getLatitude(),
-                request.getLongitude(),
-                request.getAccuracy(),
-                request.getFirmCode(),
-                "check-in"
-        );
+        // Employee self-service requires geofencing. Supervisor/admin punches
+        // retain valid location evidence without blocking on distance/accuracy.
+        validateLocation(request.getLatitude(), request.getLongitude(), request.getAccuracy(),
+                request.getFirmCode(), "check-in", verification);
 
         /*
          * Firm-specific duplicate check.
@@ -181,6 +175,7 @@ public class AttendanceService {
         );
 
         record.setCheckInAccuracy(request.getAccuracy());
+        record.setCheckInVerificationSource(verification.name());
 
         record.setCheckInLatitude(
                 request.getLatitude()
@@ -253,7 +248,7 @@ public class AttendanceService {
             );
         }
 
-        access.checkOut(employeeCode, request);
+        AttendanceVerification verification = access.checkOut(employeeCode, request);
 
         LocalDate today = LocalDate.now(attendanceClock);
 
@@ -261,21 +256,10 @@ public class AttendanceService {
                 LocalTime.now(attendanceClock).withNano(0);
 
 
-        /*
-         * -----------------------------------------------------
-         * GPS VALIDATION
-         * -----------------------------------------------------
-         *
-         * Employee self-checkout must be inside company radius.
-         */
+        // Apply the verification policy selected from the authenticated role.
 
-        validateLocation(
-                request.getLatitude(),
-                request.getLongitude(),
-                request.getAccuracy(),
-                request.getFirmCode(),
-                "check-out"
-        );
+        validateLocation(request.getLatitude(), request.getLongitude(), request.getAccuracy(),
+                request.getFirmCode(), "check-out", verification);
 
 
         /*
@@ -358,6 +342,7 @@ public class AttendanceService {
         try {
 
             record.setCheckOutAccuracy(request.getAccuracy());
+            record.setCheckOutVerificationSource(verification.name());
 
             record.setCheckOutLatitude(
                     request.getLatitude()
@@ -1394,9 +1379,13 @@ public class AttendanceService {
      * Haversine distance calculation.
      */
 
-    private void validateLocation(Double latitude, Double longitude,
-            Double accuracy, String firmCode, String action) {
-        locationPolicy.validate(latitude, longitude, accuracy, firmCode, action);
+    private void validateLocation(Double latitude, Double longitude, Double accuracy,
+            String firmCode, String action, AttendanceVerification verification) {
+        if (verification.requiresGeofence()) {
+            locationPolicy.validate(latitude, longitude, accuracy, firmCode, action);
+            return;
+        }
+        locationPolicy.validateRecorded(latitude, longitude, accuracy);
     }
 
     @Transactional(readOnly = true)

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
-import { getPrecisePosition } from "../utils/preciseLocation";
+import { getRecordedPosition } from "../utils/preciseLocation";
 import { useAuth } from "../context/AuthContext";
 import { useFirm } from "../context/FirmContext";
 import { useNavigate } from "react-router-dom";
@@ -452,7 +452,7 @@ const SupervisorDashboard = () => {
         return;
       }
 
-      getPrecisePosition(
+      getRecordedPosition(
         ({ coords }) => {
           resolve({
             latitude: coords.latitude,

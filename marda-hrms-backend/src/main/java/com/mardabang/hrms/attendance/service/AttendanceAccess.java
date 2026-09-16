@@ -32,8 +32,7 @@ public class AttendanceAccess {
         var firm=firms.findByCode(firmCode).orElseThrow(()->denied("Company not found."));
         if(user.getFirms()==null || user.getFirms().stream().noneMatch(f->Objects.equals(f.getId(),firm.getId())))throw denied("Company is not assigned to you.");
     }
-    private Employee authorize(String code,String firmCode,boolean manual) {
-        User user=actor();
+    private Employee authorize(User user,String code,String firmCode,boolean manual) {
         if(manual && user.getRole()!=Role.ADMIN && user.getRole()!=Role.INPUTER)throw denied("Manual attendance requires administrator or supervisor access.");
         if(code==null || code.isBlank() || firmCode==null || firmCode.isBlank())throw new IllegalArgumentException("Employee and company are required.");
         // Lock the employee even when no attendance row exists, serializing first punches.
@@ -49,9 +48,49 @@ public class AttendanceAccess {
         if(!manual && !Boolean.TRUE.equals(employee.getActive()))throw denied("Employee is inactive.");
         return employee;
     }
-    private String recordedBy(){User user=actor();return user.getLoginId()!=null?user.getLoginId():user.getEmail()!=null?user.getEmail():"account-"+user.getId();}
-    private String shift(Employee employee){return employee.getShiftLength()!=null && employee.getShiftLength()==12?"TWELVE_HOURS":employee.getShiftLength()!=null && employee.getShiftLength()==8?"EIGHT_HOURS":"GENERAL";}
-    public void checkIn(AttendancePunchRequest request){Employee e=authorize(request.getEmployeeCode(),request.getFirmCode(),false);request.setEmployeeName(e.getName());request.setDepartment(e.getDepartment());request.setShift(shift(e));request.setRecordedBy(recordedBy());}
-    public void checkOut(String code,AttendanceCheckoutRequest request){authorize(code,request.getFirmCode(),false);request.setRecordedBy(recordedBy());}
-    public void manual(AttendanceManualRequest request){Employee e=authorize(request.getEmployeeCode(),request.getFirmCode(),true);request.setEmployeeName(e.getName());request.setDepartment(e.getDepartment());request.setShift(shift(e));request.setRecordedBy(recordedBy());}
+    private String recordedBy(User user) {
+        if (user.getLoginId() != null && !user.getLoginId().isBlank()) return user.getLoginId();
+        if (user.getEmail() != null && !user.getEmail().isBlank()) return user.getEmail();
+        return "account-" + user.getId();
+    }
+
+    private String shift(Employee employee) {
+        if (Integer.valueOf(12).equals(employee.getShiftLength())) return "TWELVE_HOURS";
+        if (Integer.valueOf(8).equals(employee.getShiftLength())) return "EIGHT_HOURS";
+        return "GENERAL";
+    }
+
+    private AttendanceVerification verificationFor(User user) {
+        return switch (user.getRole()) {
+            case EMPLOYEE -> AttendanceVerification.EMPLOYEE_GPS;
+            case INPUTER -> AttendanceVerification.SUPERVISOR_RECORDED;
+            case ADMIN -> AttendanceVerification.ADMIN_RECORDED;
+        };
+    }
+
+    public AttendanceVerification checkIn(AttendancePunchRequest request) {
+        User user = actor();
+        Employee employee = authorize(user, request.getEmployeeCode(), request.getFirmCode(), false);
+        request.setEmployeeName(employee.getName());
+        request.setDepartment(employee.getDepartment());
+        request.setShift(shift(employee));
+        request.setRecordedBy(recordedBy(user));
+        return verificationFor(user);
+    }
+
+    public AttendanceVerification checkOut(String employeeCode, AttendanceCheckoutRequest request) {
+        User user = actor();
+        authorize(user, employeeCode, request.getFirmCode(), false);
+        request.setRecordedBy(recordedBy(user));
+        return verificationFor(user);
+    }
+
+    public void manual(AttendanceManualRequest request) {
+        User user = actor();
+        Employee employee = authorize(user, request.getEmployeeCode(), request.getFirmCode(), true);
+        request.setEmployeeName(employee.getName());
+        request.setDepartment(employee.getDepartment());
+        request.setShift(shift(employee));
+        request.setRecordedBy(recordedBy(user));
+    }
 }

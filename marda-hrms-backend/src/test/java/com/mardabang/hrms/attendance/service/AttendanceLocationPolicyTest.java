@@ -10,9 +10,10 @@ class AttendanceLocationPolicyTest {
         assertEquals(152.24, AttendanceLocationPolicy.distanceMeters(16.72032809060519, 74.46151456730551, 16.721666815274723, 74.46121491533951), 0.1);
     }
     @Test void rejectsCoarseOrMissingAccuracy() {
-        for (Double accuracy : new Double[] {null, 0.0, -1.0, Double.NaN, Double.POSITIVE_INFINITY, 50000.0, 50.01}) {
+        for (Double accuracy : new Double[] {null, -1.0, Double.NaN, Double.POSITIVE_INFINITY, 50000.0, 50.01}) {
             assertThrows(IllegalArgumentException.class, () -> policy.validate(policy.getLatitude(), policy.getLongitude(), accuracy, "TEST", "check-in"));
         }
+        assertDoesNotThrow(() -> policy.validate(policy.getLatitude(), policy.getLongitude(), 0.0, "TEST", "check-in"));
     }
     @Test void rejectsInvalidCoordinates() {
         for (Double lat : new Double[] {null, Double.NaN, Double.POSITIVE_INFINITY, 91.0, -91.0}) {
@@ -22,6 +23,14 @@ class AttendanceLocationPolicyTest {
     }
     @Test void rejectsOutsideCompany() {
         assertThrows(IllegalArgumentException.class, () -> policy.validate(16.77, 74.46, 10.0, "TEST", "check-out"));
+    }
+    @Test void recordedSupervisorLocationAllowsCoarseAccuracyAndOutsideCoordinates() {
+        assertDoesNotThrow(() -> policy.validateRecorded(16.77, 74.46, 50000.0));
+    }
+    @Test void recordedSupervisorLocationStillRequiresValidEvidence() {
+        assertThrows(IllegalArgumentException.class, () -> policy.validateRecorded(null, 74.46, 10.0));
+        assertDoesNotThrow(() -> policy.validateRecorded(16.72, 74.46, 0.0));
+        assertThrows(IllegalArgumentException.class, () -> policy.validateRecorded(16.72, 74.46, -1.0));
     }
     @Test void usesFirmSpecificLocation() {
         AttendanceLocationPolicy.Site site = new AttendanceLocationPolicy.Site();

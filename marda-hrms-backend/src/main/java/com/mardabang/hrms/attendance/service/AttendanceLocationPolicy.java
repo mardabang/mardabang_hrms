@@ -67,15 +67,7 @@ public class AttendanceLocationPolicy {
      */
     public void validate(Double lat, Double lon, Double accuracy,
             String firmCode, String action) {
-
-        if (lat == null || lon == null || !Double.isFinite(lat) || !Double.isFinite(lon)
-                || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
-            throw new IllegalArgumentException("Valid latitude and longitude are required.");
-        }
-
-        if (accuracy == null || !Double.isFinite(accuracy) || accuracy <= 0) {
-            throw new IllegalArgumentException("Valid positive location accuracy is required.");
-        }
+        validateRecorded(lat, lon, accuracy);
 
         Site site = firms.get(firmCode);
         double centreLat = site == null || site.latitude == null ? latitude : site.latitude;
@@ -101,6 +93,21 @@ public class AttendanceLocationPolicy {
             throw new IllegalArgumentException(String.format(Locale.US,
                     "You are outside the allowed company location for %s. Distance: %.2f metres. Allowed radius: %.0f metres.",
                     action, distance, radius));
+        }
+    }
+
+    /**
+     * Validates location evidence recorded by an administrator or supervisor.
+     * The coordinates are retained for audit, but accuracy and office distance
+     * do not block the attendance action.
+     */
+    public void validateRecorded(Double lat, Double lon, Double accuracy) {
+        if (lat == null || lon == null || !Double.isFinite(lat) || !Double.isFinite(lon)
+                || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+            throw new IllegalArgumentException("Valid latitude and longitude are required.");
+        }
+        if (accuracy == null || !Double.isFinite(accuracy) || accuracy < 0) {
+            throw new IllegalArgumentException("Valid non-negative location accuracy is required.");
         }
     }
 

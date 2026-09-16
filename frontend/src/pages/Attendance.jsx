@@ -105,6 +105,85 @@ const formatExportTime = (value) => {
     : text;
 };
 
+const parseTime12 = (value) => {
+  const match = String(value || "").match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return { hour: "", minute: "00", period: "AM" };
+  const hour24 = Number(match[1]);
+  return {
+    hour: String(hour24 % 12 || 12),
+    minute: match[2],
+    period: hour24 >= 12 ? "PM" : "AM",
+  };
+};
+
+const toTime24 = ({ hour, minute, period }) => {
+  if (!hour) return "";
+  const hour12 = Number(hour);
+  const hour24 = (hour12 % 12) + (period === "PM" ? 12 : 0);
+  return `${String(hour24).padStart(2, "0")}:${String(minute || "00").padStart(2, "0")}`;
+};
+
+const formatTime12 = (value) => {
+  if (!value) return "--";
+  const { hour, minute, period } = parseTime12(value);
+  return hour ? `${hour}:${minute} ${period}` : "--";
+};
+
+const AttendanceTimeInput = ({ label, value, onChange }) => {
+  const parts = parseTime12(value);
+  const update = (field, nextValue) => {
+    if (field === "hour" && !nextValue) {
+      onChange("");
+      return;
+    }
+    onChange(toTime24({
+      ...parts,
+      [field]: nextValue,
+      hour: field === "hour" ? nextValue : (parts.hour || "12"),
+    }));
+  };
+
+  return (
+    <label>
+      {label}
+      <div className="attendance-time-input" role="group" aria-label={label}>
+        <select aria-label={`${label} hour`} value={parts.hour} onChange={(event) => update("hour", event.target.value)}>
+          <option value="">--</option>
+          {Array.from({ length: 12 }, (_, index) => String(index + 1)).map((hour) => <option key={hour} value={hour}>{hour}</option>)}
+        </select>
+        <span>:</span>
+        <select aria-label={`${label} minute`} value={parts.minute} onChange={(event) => update("minute", event.target.value)}>
+          {Array.from({ length: 60 }, (_, index) => String(index).padStart(2, "0")).map((minute) => <option key={minute} value={minute}>{minute}</option>)}
+        </select>
+        <select aria-label={`${label} AM or PM`} value={parts.period} onChange={(event) => update("period", event.target.value)}>
+          <option value="AM">AM</option>
+          <option value="PM">PM</option>
+        </select>
+      </div>
+    </label>
+  );
+};
+
+const getAssignedShift = (employee = {}, storedShift = "") => {
+  if (storedShift) return storedShift;
+  if (Number(employee.shiftLength) === 12) return "TWELVE_HOURS";
+  if (Number(employee.shiftLength) === 8) return "EIGHT_HOURS";
+  return "GENERAL";
+};
+
+const getShiftSchedule = (shift) => {
+  const normalized = String(shift || "GENERAL").trim().toUpperCase().replaceAll(" ", "_");
+  if (normalized === "EIGHT_HOURS" || normalized === "8_HOURS") return { start: "09:00", end: "17:00" };
+  if (normalized === "TWELVE_HOURS" || normalized === "12_HOURS") return { start: "09:00", end: "21:00" };
+  return { start: "09:00", end: "18:00" };
+};
+
+const shiftLabel = (shift) => ({
+  GENERAL: "General",
+  EIGHT_HOURS: "8 Hours",
+  TWELVE_HOURS: "12 Hours",
+}[String(shift || "").toUpperCase()] || shift || "General");
+
 const getStatusLabel = (status) => {
   const option = statusOptions.find(
     ([code]) => code === status
@@ -358,7 +437,7 @@ const Attendance = () => {
 
         incomplete: false,
 
-        shiftName: "General",
+        shiftName: getAssignedShift(employee),
 
         enteredBy: "Admin",
 
@@ -421,7 +500,7 @@ const Attendance = () => {
         isPresent,
 
       shiftName:
-        record.shift || "General",
+        getAssignedShift(employee, record.shift),
 
       enteredBy:
         record.recordedBy || "Admin",
@@ -541,6 +620,8 @@ const Attendance = () => {
 
     const record =
       getRecord(employee, day);
+    const assignedShift = getAssignedShift(employee, record.shiftName);
+    const shiftSchedule = getShiftSchedule(assignedShift);
 
     setValidationError("");
 
@@ -560,12 +641,11 @@ const Attendance = () => {
       overtime:
         Number(record.overtime) || 0,
 
-      shiftName:
-        record.shiftName || "General",
+      shiftName: assignedShift,
 
-      shiftStart: "09:00",
+      shiftStart: shiftSchedule.start,
 
-      shiftEnd: "18:00",
+      shiftEnd: shiftSchedule.end,
 
       recordedBy: "Admin",
 
@@ -616,7 +696,8 @@ const Attendance = () => {
       return;
     }
 
-    if (entry.status === "P" && entry.checkOut && entry.checkOut < entry.checkIn) {
+    const isOvernightShift = String(entry.shiftName || entry.employee.shift || "").toUpperCase().includes("NIGHT");
+    if (entry.status === "P" && entry.checkOut && entry.checkOut < entry.checkIn && !isOvernightShift) {
       setValidationError("Check-out time cannot be earlier than check-in time.");
       return;
     }
@@ -649,7 +730,8 @@ const Attendance = () => {
         const [hours, minutes] = String(time).split(":").map(Number);
         return hours * 60 + minutes;
       };
-      const workedMinutes = toMinutes(entry.checkOut) - toMinutes(entry.checkIn);
+      let workedMinutes = toMinutes(entry.checkOut) - toMinutes(entry.checkIn);
+      if (workedMinutes < 0 && isOvernightShift) workedMinutes += 24 * 60;
       overtime = Math.max(0, workedMinutes - 480) / 60;
       overtime = Number(overtime.toFixed(2));
     }
@@ -1808,8 +1890,12 @@ const Attendance = () => {
 
                   <div>
 
-                    <strong>
-                      Check-in Location
+                  <strong>
+                      {entry.checkInVerificationSource === "SUPERVISOR_RECORDED"
+                        ? "Supervisor-recorded location"
+                        : entry.checkInVerificationSource === "ADMIN_RECORDED"
+                        ? "Administrator-recorded location"
+                        : "Employee check-in location"}
                     </strong>
 
                     <p>
@@ -1926,30 +2012,11 @@ const Attendance = () => {
                     value={
                       entry.shiftName
                     }
-                    onChange={(
-                      event
-                    ) =>
-                      updateEntry(
-                        "shiftName",
-                        event.target.value
-                      )
-                    }
+                    disabled
                   >
 
-                    <option value="General">
-                      General
-                    </option>
-
-                    <option value="Morning">
-                      Morning
-                    </option>
-
-                    <option value="Evening">
-                      Evening
-                    </option>
-
-                    <option value="Night">
-                      Night
+                    <option value={entry.shiftName}>
+                      {shiftLabel(entry.shiftName)}
                     </option>
 
                   </select>
@@ -1959,58 +2026,20 @@ const Attendance = () => {
                 <div className="attendance-entry-shift">
                   <span>Expected</span>
                   <strong>
-                  {entry.shiftStart}
+                  {formatTime12(entry.shiftStart)}
                   {" - "}
-                  {entry.shiftEnd}
+                  {formatTime12(entry.shiftEnd)}
                   </strong>
 
                 </div>
 
-                <label>
+                <AttendanceTimeInput label="Actual Check-in" value={entry.checkIn} onChange={(value) => updateEntry("checkIn", value)} />
 
-                  Actual Check-in
-
-                  <input
-                    type="time"
-                    value={
-                      entry.checkIn
-                    }
-                    onChange={(
-                      event
-                    ) =>
-                      updateEntry(
-                        "checkIn",
-                        event.target.value
-                      )
-                    }
-                  />
-
-                </label>
-
-                <label>
-
-                  Actual Check-out
-
-                  <input
-                    type="time"
-                    value={
-                      entry.checkOut
-                    }
-                    onChange={(
-                      event
-                    ) =>
-                      updateEntry(
-                        "checkOut",
-                        event.target.value
-                      )
-                    }
-                  />
-
-                </label>
+                <AttendanceTimeInput label="Actual Check-out" value={entry.checkOut} onChange={(value) => updateEntry("checkOut", value)} />
 
                 <div className="attendance-entry-shift attendance-entry-recorded-times">
-                  <div><span>Check-in</span><strong>{entry.checkIn || "--"}</strong></div>
-                  <div><span>Check-out</span><strong>{entry.checkOut || "--"}</strong></div>
+                  <div><span>Check-in</span><strong>{formatTime12(entry.checkIn)}</strong></div>
+                  <div><span>Check-out</span><strong>{formatTime12(entry.checkOut)}</strong></div>
                 </div>
 
                 <label>

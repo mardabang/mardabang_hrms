@@ -6,6 +6,21 @@ export async function getPrecisePosition(onSuccess, onError) {
   getGpsPosition(onSuccess, onError);
 }
 
+// Supervisor/admin punches retain the device location for audit only.
+// Return the first valid browser reading without waiting for geofence-grade accuracy.
+export function getRecordedPosition(onSuccess, onError) {
+  navigator.geolocation.getCurrentPosition(
+    onSuccess,
+    (error) => {
+      const message = error.code === 1
+        ? "Please allow location access for this website and browser, then retry."
+        : "Unable to record your current location. Check location services and retry.";
+      onError(new Error(message));
+    },
+    { enableHighAccuracy: true, maximumAge: 30000, timeout: 10000 }
+  );
+}
+
 // Keep listening for an accurate fix, with a deadline covering the entire wait.
 function getGpsPosition(onSuccess, onError) {
   let watchId;

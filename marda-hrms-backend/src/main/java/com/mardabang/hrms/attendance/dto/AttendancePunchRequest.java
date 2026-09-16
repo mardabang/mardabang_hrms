@@ -3,7 +3,6 @@ package com.mardabang.hrms.attendance.dto;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 
 import lombok.Getter;
 import lombok.Setter;
@@ -15,17 +14,12 @@ public class AttendancePunchRequest {
     @NotBlank
     private String employeeCode;
 
-    @NotBlank
     private String employeeName;
 
-    @NotBlank
     private String department;
 
-
-    @NotBlank
     private String shift;
 
-    @NotBlank
     private String recordedBy;
     
     @NotBlank
@@ -35,7 +29,7 @@ public class AttendancePunchRequest {
     @DecimalMax(value = "90.0")
     private Double latitude;
 
-    @DecimalMin(value = "0.0", inclusive = false, message = "Location accuracy must be positive.")
+    @DecimalMin(value = "0.0", message = "Location accuracy cannot be negative.")
     private Double accuracy;
 
     @DecimalMin(value = "-180.0")
