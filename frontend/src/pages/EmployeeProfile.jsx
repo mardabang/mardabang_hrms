@@ -248,6 +248,7 @@ const EmployeeProfile = () => {
   ];
 
   const employmentDetails = [
+    { icon: "business", label: "Assigned Firm", value: employee.firmCode ? `${employee.firmCode}${employee.firmName ? ` · ${employee.firmName}` : ""}` : employee.firmId ? "Firm details unavailable" : "Not assigned" },
     { icon: "badge", label: "Employee code", value: displayValue(employee.employeeCode || employee.id) },
     { icon: "corporate_fare", label: "Department", value: displayValue(employee.department) },
     { icon: "workspace_premium", label: "Designation", value: displayValue(employee.designation) },

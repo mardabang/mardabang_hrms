@@ -3680,6 +3680,27 @@ a {
   display:block;
 }
 
+.employee-form-card .checkbox-grid + .form-grid{
+  margin-top:24px;
+  column-gap:24px;
+  row-gap:24px;
+  padding-bottom:12px;
+}
+
+.employee-form-card .checkbox-card div{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+
+.employee-form-card .checkbox-grid + .form-grid .form-group{
+  gap:10px;
+}
+
+.employee-form-card .checkbox-grid + .form-grid .form-group small{
+  line-height:1.5;
+}
+
 .checkbox-card span{
   font-size:var(--font-label);
   color:var(--text-secondary);
