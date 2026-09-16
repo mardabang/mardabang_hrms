@@ -6,7 +6,10 @@ export function registrationPayload(form) {
 
     role: form.role,
 
-    employeeCode: null,
+    employeeCode:
+      form.role === "INPUTER"
+        ? (form.employeeCode || "").trim()
+        : null,
 
     loginId: (form.role === "ADMIN" ? form.email || "" : form.mobile || "").trim(),
 
@@ -34,6 +37,10 @@ export function validateRegistration(form) {
 
   if (form.role === "INPUTER" && !(form.firmCode || "").trim()) {
     return "Please select a firm for the Supervisor.";
+  }
+
+  if (form.role === "INPUTER" && !(form.employeeCode || "").trim()) {
+    return "Please select the employee profile linked to this Supervisor.";
   }
 
   if (

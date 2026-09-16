@@ -29,12 +29,13 @@ class UserAccessRegistrationTest {
     RegisterRequest request = new RegisterRequest();
     @BeforeEach void setup() {
         request.setFullName("Supervisor"); request.setEmail("supervisor@example.test");
-        request.setMobile("9876543210"); request.setEmployeeCode("EMP-TEST"); request.setRole(Role.INPUTER);
+        request.setMobile("9876543210"); request.setRole(Role.INPUTER);
+        request.setFirmCode("MBIPL"); request.setEmployeeCode("EMP-TEST"); request.setPassword("long-supervisor-password");
         employee.setEmployeeCode("EMP-TEST"); employee.setFirmId(1L); employee.setActive(true);
         when(employees.getEmployeeByCode("EMP-TEST")).thenReturn(employee);
-        when(firms.findById(1L)).thenReturn(Optional.of(firm));
+        when(firms.findByCode("MBIPL")).thenReturn(Optional.of(firm));
     }
-    @Test void supervisorIsCreatedWithoutPasswordAndWithEmployeesFirm() {
+    @Test void supervisorIsCreatedWithPasswordAndSelectedFirm() {
         assertEquals(201, controller.register(request).getStatusCode().value());
         ArgumentCaptor<User> saved = ArgumentCaptor.forClass(User.class);
         verify(users).saveUser(saved.capture());
@@ -44,26 +45,26 @@ class UserAccessRegistrationTest {
         assertEquals("EMP-TEST", saved.getValue().getEmployeeCode());
     }
     @Test void missingOrInactiveFirmPreventsRegistration() {
-        when(firms.findById(1L)).thenReturn(Optional.empty());
+        when(firms.findByCode("MBIPL")).thenReturn(Optional.empty());
         assertEquals(400, controller.register(request).getStatusCode().value());
         verify(users, never()).saveUser(any());
     }
-    @Test void inactiveEmployeePreventsRegistration() {
-        employee.setActive(false);
+    @Test void inactiveFirmPreventsRegistration() {
+        firm.setActive(false);
         assertEquals(400, controller.register(request).getStatusCode().value());
         verify(users, never()).saveUser(any());
     }
-    @Test void existingLinkedAccountCannotBeDuplicated() {
-        when(users.employeeCodeExists("EMP-TEST")).thenReturn(true);
+    @Test void existingMobileAccountCannotBeDuplicated() {
+        when(users.mobileExists("9876543210")).thenReturn(true);
         assertEquals(409, controller.register(request).getStatusCode().value());
     }
     @Test void adminRequiresPasswordButNoEmployeeCode() {
-        request.setRole(Role.ADMIN); request.setEmployeeCode(null);
+        request.setRole(Role.ADMIN); request.setEmployeeCode(null); request.setPassword(null);
         assertEquals(400, controller.register(request).getStatusCode().value());
         request.setPassword("long-admin-password");
         assertEquals(201, controller.register(request).getStatusCode().value());
     }
-    @Test void invalidMobileFailsBeanValidationWhileNullSupervisorPasswordIsAllowed() {
+    @Test void invalidMobileFailsBeanValidation() {
         try (var factory = Validation.buildDefaultValidatorFactory()) {
             assertTrue(factory.getValidator().validate(request).isEmpty());
             request.setMobile("12345");

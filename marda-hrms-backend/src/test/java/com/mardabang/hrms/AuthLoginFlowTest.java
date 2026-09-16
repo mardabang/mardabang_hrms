@@ -4,6 +4,7 @@ import com.mardabang.hrms.auth.dto.*;
 import com.mardabang.hrms.auth.security.JwtUtil;
 import com.mardabang.hrms.auth.service.PasswordResetService;
 import com.mardabang.hrms.employee.service.EmployeeService;
+import com.mardabang.hrms.employee.dto.EmployeeDto;
 import com.mardabang.hrms.firms.repository.FirmRepository;
 import com.mardabang.hrms.firms.entity.Firm;
 import com.mardabang.hrms.user.entity.*;
@@ -20,7 +21,8 @@ class AuthLoginFlowTest {
     PasswordEncoder encoder = mock(PasswordEncoder.class);
     JwtUtil jwt = mock(JwtUtil.class);
     FirmRepository firms = mock(FirmRepository.class);
-    AuthController controller = new AuthController(users, jwt, encoder, mock(EmployeeService.class), mock(PasswordResetService.class), firms);
+    EmployeeService employees = mock(EmployeeService.class);
+    AuthController controller = new AuthController(users, jwt, encoder, employees, mock(PasswordResetService.class), firms);
     LoginRequest login(String id) { LoginRequest r = new LoginRequest(); r.setLoginId(id); r.setPassword("test-password"); return r; }
     User account(Role role) { return User.builder().id(1L).loginId("LEGACY-ID").email("person@example.test").mobile("9876543210").fullName("Person").role(role).password("hash").active(true).build(); }
     @BeforeEach void setup() { when(encoder.matches("test-password", "hash")).thenReturn(true); }
@@ -63,8 +65,10 @@ class AuthLoginFlowTest {
         assertEquals("person@example.test", user.getValue().getLoginId());
     }
     @Test void derivesSupervisorIdFromPhone() {
-        RegisterRequest r=registration(Role.INPUTER);r.setFirmCode("MBIPL");
+        RegisterRequest r=registration(Role.INPUTER);r.setFirmCode("MBIPL");r.setEmployeeCode("SUP-1");
         when(firms.findByCode("MBIPL")).thenReturn(Optional.of(new Firm(1L,"MBIPL","Office",true)));
+        EmployeeDto employee = new EmployeeDto();employee.setEmployeeCode("SUP-1");employee.setFirmId(1L);employee.setActive(true);
+        when(employees.getEmployeeByCode("SUP-1")).thenReturn(employee);
         assertEquals(201, controller.register(r).getStatusCode().value());
         ArgumentCaptor<User> user = ArgumentCaptor.forClass(User.class);verify(users).saveUser(user.capture());
         assertEquals("9876543210", user.getValue().getLoginId());

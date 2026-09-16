@@ -51,16 +51,11 @@ public class SecurityConfig {
                 .permitAll()
 
                 // -------------------------------------------------
-                // TEMPORARY:
-                // Allow registration while we finish the
-                // Admin/Supervisor account-management API.
-                // -------------------------------------------------
-
                 .requestMatchers(
                     HttpMethod.POST,
                     "/api/auth/register"
                 )
-                .permitAll()
+                .hasRole("ADMIN")
 
                 // -------------------------------------------------
                 // Employee APIs

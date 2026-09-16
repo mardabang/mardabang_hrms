@@ -21,6 +21,7 @@ const Register = () => {
     mobile: "",
     loginId: "",
     firmCode: "",
+    employeeCode: "",
     role: "INPUTER",
     password: "",
     confirmPassword: "",
@@ -56,6 +57,7 @@ const Register = () => {
             password: "",
             confirmPassword: "",
             loginId: "",
+            employeeCode: "",
           }
         : {}),
     }));
@@ -101,6 +103,7 @@ const Register = () => {
         mobile: "",
         loginId: "",
         firmCode: "",
+        employeeCode: "",
         role: current.role,
         password: "",
         confirmPassword: "",
@@ -222,8 +225,9 @@ const Register = () => {
 
           {/* Firm */}
 {formData.role === "INPUTER" && (
-  <div className="form-group">
-    <label>Firm</label>
+  <>
+    <div className="form-group">
+      <label>Firm</label>
 
     <select
       name="firmCode"
@@ -243,7 +247,23 @@ const Register = () => {
     <small>
       Select the firm this supervisor will manage.
     </small>
-  </div>
+    </div>
+
+    <div className="form-group">
+      <label>Employee Code</label>
+      <input
+        type="text"
+        name="employeeCode"
+        value={formData.employeeCode}
+        onChange={handleChange}
+        placeholder="Enter the supervisor's employee code"
+        required
+      />
+      <small>
+        The employee must already exist in the selected firm. This link is required for supervisor self-attendance.
+      </small>
+    </div>
+  </>
 )}
 
           {/* User ID */}

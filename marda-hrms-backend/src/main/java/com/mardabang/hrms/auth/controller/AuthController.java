@@ -2,6 +2,7 @@ package com.mardabang.hrms.auth.controller;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -180,8 +181,35 @@ public class AuthController {
                         .body("Selected firm is inactive.");
             }
 
-            // Supervisor is NOT an employee
-            finalEmployeeCode = null;
+            if (finalEmployeeCode == null || finalEmployeeCode.isBlank()) {
+                return ResponseEntity.badRequest()
+                        .body("Employee code is required for a Supervisor account.");
+            }
+
+            EmployeeDto employee;
+            try {
+                employee = employeeService.getEmployeeByCode(finalEmployeeCode);
+            } catch (RuntimeException exception) {
+                return ResponseEntity.badRequest()
+                        .body("Employee code does not exist.");
+            }
+
+            if (employee == null
+                    || Boolean.FALSE.equals(employee.getActive())
+                    || "Inactive".equalsIgnoreCase(employee.getStatus())) {
+                return ResponseEntity.badRequest()
+                        .body("The linked supervisor employee must be active.");
+            }
+
+            if (!Objects.equals(employee.getFirmId(), assignedFirm.getId())) {
+                return ResponseEntity.badRequest()
+                        .body("The linked employee must belong to the selected firm.");
+            }
+
+            if (userService.employeeCodeExists(finalEmployeeCode)) {
+                return ResponseEntity.status(HttpStatus.CONFLICT)
+                        .body("An account is already linked to this employee code.");
+            }
 
         } else if (role == Role.EMPLOYEE) {
 
